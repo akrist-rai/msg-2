@@ -1,6 +1,6 @@
 import Router from "@koa/router";
 import type { Context } from "koa";
-import { checkDbHealth } from "../db/health";
+import { checkDbHealth } from "../db/index.ts";
 
 const router = new Router();
 

@@ -1,23 +1,11 @@
-import Koa, { type Context } from "koa";
-import Router from "@koa/router";
-import cors from "@koa/cors";
-import koaBody from "koa-body";
+import Koa from "koa";
 import serve from "koa-static";
 import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// setting up routes
-import { authRouter } from "./routes/auth.ts";
-import { roomsRouter } from "./routes/rooms.ts";
-import { createMessagesRouter } from "./routes/messages.ts";
 import { WebSocketServer } from "./ws/handler.ts";
-import { checkDbHealth } from "./db/index.ts";
-
-
 import createApiRouter from "./routes";
-import { WebSocketServer } from "ws";
-
 
 //seting up middleware
 import corsMiddleware from "./middleware/cors";

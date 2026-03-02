@@ -1,9 +1,9 @@
 import Router from "@koa/router";
 import healthRouter from "./health";
-import authRouter from "./auth";
-import roomsRouter from "./rooms";
+import { authRouter } from "./auth";
+import { roomsRouter } from "./rooms";
 import { createMessagesRouter } from "./messages";
-import type { WebSocketServer } from "ws";
+import type { WebSocketServer } from "../ws/handler.ts";
 
 export default function createApiRouter(wss: WebSocketServer) {
   const router = new Router({ prefix: "/api" });
