@@ -18,6 +18,7 @@ import { checkDbHealth } from "./db/index.ts";
 //seting up middleware
 import corsMiddleware from "./middleware/cors";
 import errorHandler from "./middleware/errorhandler.ts";
+import bodyParser from "./middleware/bodyParser";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -37,15 +38,7 @@ app.use(errorHandler);
 
 app.use(corsMiddleware);
 
-
-app.use(
-  koaBody({
-    json: true,
-    multipart: true,
-    jsonLimit: "1mb",
-    formLimit: "1mb",
-  })
-);
+app.use(bodyParser);
 
 // Request logging in dev
 if (isDev) {
