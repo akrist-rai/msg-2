@@ -36,20 +36,13 @@ app.proxy = true;
 // ─── middleware ───────────────────────────────────────────────────────────
 
 app.use(errorHandler);
-
-
 app.use(corsMiddleware);
-
 app.use(bodyParser);
-
 // Request logging in dev
-
 if (isDev) {
   app.use(logger);
 }
-
 app.use(rateLimit);
-
 // ─── WebSocket Server ─────────────────────────────────────────────────────────
 
 const wss = new WebSocketServer();
