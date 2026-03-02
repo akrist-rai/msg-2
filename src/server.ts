@@ -15,6 +15,10 @@ import { WebSocketServer } from "./ws/handler.ts";
 import { checkDbHealth } from "./db/index.ts";
 
 
+import createApiRouter from "./routes";
+import { WebSocketServer } from "ws";
+
+
 //seting up middleware
 import corsMiddleware from "./middleware/cors";
 import errorHandler from "./middleware/errorhandler.ts";
@@ -49,28 +53,9 @@ const wss = new WebSocketServer();
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-const apiRouter = new Router();
-
-apiRouter.get("/api/health", async (ctx: Context) => {
-  const dbOk = await checkDbHealth();
-  ctx.status = dbOk ? 200 : 503;
-  ctx.body = {
-    status: dbOk ? "ok" : "degraded",
-    db: dbOk ? "connected" : "disconnected",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  };
-});
-
+const apiRouter = createApiRouter(wss);
 app.use(apiRouter.routes());
-app.use(authRouter.routes());
-app.use(authRouter.allowedMethods());
-app.use(roomsRouter.routes());
-app.use(roomsRouter.allowedMethods());
-
-const messagesRouter = createMessagesRouter(wss);
-app.use(messagesRouter.routes());
-app.use(messagesRouter.allowedMethods());
+app.use(apiRouter.allowedMethods());
 
 // ─── Static Files ─────────────────────────────────────────────────────────────
 
