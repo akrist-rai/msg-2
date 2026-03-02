@@ -4,7 +4,7 @@ import { eq, and, inArray, desc, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db/index.ts";
 import { requireAuth } from "../middleware/auth.ts";
 
-export const roomsRouter = new Router({ prefix: "/api/rooms" });
+export const roomsRouter = new Router({ prefix: "/rooms" });
 
 // ─── List rooms for current user ──────────────────────────────────────────────
 

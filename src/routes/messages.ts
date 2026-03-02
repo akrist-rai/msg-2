@@ -27,7 +27,7 @@ const sendMessageSchema = z.object({
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createMessagesRouter(wss?: WebSocketServer) {
-  const router = new Router({ prefix: "/api/rooms/:roomId/messages" });
+  const router = new Router({ prefix: "/rooms/:roomId/messages" });
 
   // ─── GET /  (cursor-based pagination) ──────────────────────────────────────
 

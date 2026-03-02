@@ -16,7 +16,6 @@ import { relations } from "drizzle-orm";
 export const roomTypeEnum = pgEnum("room_type", ["direct", "group", "channel"]);
 export const messageTypeEnum = pgEnum("message_type", [
   "text",
-  "image",
   "system",
 ]);
 export const memberRoleEnum = pgEnum("member_role", [
@@ -24,23 +23,36 @@ export const memberRoleEnum = pgEnum("member_role", [
   "admin",
   "member",
 ]);
+export const attachmentTypeEnum = pgEnum("attachment_type", [
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
+/**   refrence for message attachments:
+ * Attachment categories — used to decide how the frontend renders the file.
+ * "image"    → show inline <img>
+ * "video"    → show inline <video> player
+ * "audio"    → show inline <audio> player
+ * "document" → show a download card with filename + size
+ */
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export const users = pgTable("users", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  username: text("username").notNull().unique(),
-  displayName: text("display_name").notNull(),
-  email: text("email").notNull().unique(),
+  id:           uuid("id").defaultRandom().primaryKey(),
+  username:     text("username").notNull().unique(),
+  displayName:  text("display_name").notNull(),
+  email:        text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  avatarUrl: text("avatar_url"),
-  bio: text("bio"),
-  isOnline: boolean("is_online").default(false),
-  lastSeen: timestamp("last_seen", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true })
+  avatarUrl:    text("avatar_url"),
+  bio:          text("bio"),
+  isOnline:     boolean("is_online").default(false),
+  lastSeen:     timestamp("last_seen", { withTimezone: true }),
+  createdAt:    timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
+  updatedAt:    timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 });
@@ -120,6 +132,82 @@ export const messages = pgTable(
   })
 );
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ATTACHMENTS
+//
+// WHY A SEPARATE TABLE?
+// A message can have multiple attachments (e.g. a user drops 3 images at once).
+// Keeping them in a separate table with a foreign key to messages lets us:
+//   - Query just the attachments for a message
+//   - Upload a file before the message exists (message_id is nullable here)
+//   - Easily add metadata (dimensions, duration) per file
+//
+// HOW SUPABASE STORAGE WORKS:
+//   1. Files live in a "bucket" (like an S3 bucket).
+//   2. You upload via supabase.storage.from("bucket").upload(path, file).
+//   3. The `storage_path` column stores the path inside the bucket.
+//   4. The `public_url` is the CDN URL users actually load the file from.
+//      For public buckets this never expires; for private buckets you'd
+//      generate a signed URL at read time.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const attachments = pgTable(
+  "attachments",
+  {
+    id:              uuid("id").defaultRandom().primaryKey(),
+    // nullable while the file is uploaded but the message hasn't been sent yet
+    messageId:       uuid("message_id").references(() => messages.id, { onDelete: "cascade" }),
+    uploaderId:      uuid("uploader_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    attachmentType:  attachmentTypeEnum("attachment_type").notNull(),
+    storagePath:     text("storage_path").notNull(),   // e.g. "user-id/filename-uuid.jpg"
+    publicUrl:       text("public_url").notNull(),      // full CDN URL
+    filename:        text("filename").notNull(),         // original filename shown to users
+    mimeType:        text("mime_type").notNull(),        // e.g. "image/jpeg"
+    // bigint because files can be > 2 GB; JavaScript reads bigint as string by default
+    size:            bigint("size", { mode: "number" }).notNull(),
+    // images / videos only
+    width:           integer("width"),
+    height:          integer("height"),
+    // videos / audio only (seconds)
+    durationSeconds: integer("duration_seconds"),
+    createdAt:       timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    messageIdx:  index("attachments_message_idx").on(t.messageId),
+    uploaderIdx: index("attachments_uploader_idx").on(t.uploaderId),
+  })
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MESSAGE READS  ("seen receipts")
+//
+// WHY NOT JUST USE room_members.last_read_at?
+// last_read_at tells us WHEN a user last read the room, but not WHICH messages
+// they've seen. With a per-message read table we can show "Seen by Alice at 14:32"
+// on each individual message.
+//
+// SCALABILITY NOTE:
+// In very large rooms (thousands of members) this table would grow huge.
+// For now it's fine for a learning project. Production systems often use
+// a "high-water mark" approach instead (storing only the latest-read message ID).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const messageReads = pgTable(
+  "message_reads",
+  {
+    id:        uuid("id").defaultRandom().primaryKey(),
+    messageId: uuid("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    userId:    uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    readAt:    timestamp("read_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    // A user can only read a message once — ON CONFLICT DO NOTHING is used at insert time
+    uniqueRead:  unique().on(t.messageId, t.userId),
+    messageIdx:  index("message_reads_message_idx").on(t.messageId),
+    userIdx:     index("message_reads_user_idx").on(t.userId),
+  })
+);
+
 // ─── Reactions ────────────────────────────────────────────────────────────────
 
 export const reactions = pgTable(
@@ -164,6 +252,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   sentMessages: many(messages),
   reactions: many(reactions),
   refreshTokens: many(refreshTokens),
+  messageReads:  many(messageReads),
+  attachments:   many(attachments),
 }));
 
 export const roomsRelations = relations(rooms, ({ many, one }) => ({
@@ -180,11 +270,21 @@ export const roomMembersRelations = relations(roomMembers, ({ one }) => ({
 export const messagesRelations = relations(messages, ({ one, many }) => ({
   room: one(rooms, { fields: [messages.roomId], references: [rooms.id] }),
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
-  replyTo: one(messages, {
-    fields: [messages.replyToId],
-    references: [messages.id],
+  replyTo: one(messages, {fields: [messages.replyToId],references: [messages.id],
   }),
   reactions: many(reactions),
+    attachments: many(attachments),  
+  reads:       many(messageReads),  
+}));
+
+export const attachmentsRelations = relations(attachments, ({ one }) => ({
+  message:  one(messages, { fields: [attachments.messageId],  references: [messages.id] }),
+  uploader: one(users,    { fields: [attachments.uploaderId], references: [users.id]    }),
+}));
+
+export const messageReadsRelations = relations(messageReads, ({ one }) => ({
+  message: one(messages, { fields: [messageReads.messageId], references: [messages.id] }),
+  user:    one(users,    { fields: [messageReads.userId],    references: [users.id]    }),
 }));
 
 export const reactionsRelations = relations(reactions, ({ one }) => ({

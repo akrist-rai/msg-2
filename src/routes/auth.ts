@@ -10,7 +10,7 @@ import {
   requireAuth,
 } from "../middleware/auth.ts";
 
-export const authRouter = new Router({ prefix: "/api/auth" });
+export const authRouter = new Router({ prefix: "/auth" });
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 

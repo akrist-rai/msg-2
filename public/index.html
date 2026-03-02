@@ -1092,7 +1092,10 @@
 // ════════════════════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════════════════════
-const API = '/api';
+const BACKEND_ORIGIN = location.port === '3000'
+  ? location.origin
+  : `${location.protocol}//localhost:3000`;
+const API = `${BACKEND_ORIGIN}/api`;
 let state = {
   user: null,
   accessToken: null,
@@ -1271,7 +1274,8 @@ function connectWS() {
   updateWsStatus('connecting');
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${proto}//${location.host}/ws?token=${state.accessToken}`);
+  const wsHost = BACKEND_ORIGIN.replace(/^http/, 'ws');
+  const ws = new WebSocket(`${wsHost}/ws?token=${state.accessToken}`);
   state.ws = ws;
 
   ws.onopen = () => {
