@@ -13,9 +13,11 @@ import { roomsRouter } from "./routes/rooms.ts";
 import { createMessagesRouter } from "./routes/messages.ts";
 import { WebSocketServer } from "./ws/handler.ts";
 import { checkDbHealth } from "./db/index.ts";
-import errorHandler from "./middleware/errorhandler.ts";
+
 
 //seting up middleware
+import corsMiddleware from "./middleware/cors";
+import errorHandler from "./middleware/errorhandler.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -28,23 +30,13 @@ const app = new Koa();
 // Trust proxy headers (e.g. X-Forwarded-For)
 app.proxy = true;
 
-// ─── Error Handling ───────────────────────────────────────────────────────────
+// ─── middleware ───────────────────────────────────────────────────────────
 
 app.use(errorHandler);
-// ─── Middleware ───────────────────────────────────────────────────────────────
 
-app.use(
-  cors({
-    origin: (ctx) => {
-      const allowed = process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000", "http://localhost:5173"];
-      const origin = ctx.request.headers.origin || "";
-      return allowed.includes(origin) ? origin : allowed[0];
-    },
-    credentials: true,
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
-  })
-);
+
+app.use(corsMiddleware);
+
 
 app.use(
   koaBody({
