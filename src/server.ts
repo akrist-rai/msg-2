@@ -19,6 +19,8 @@ import { checkDbHealth } from "./db/index.ts";
 import corsMiddleware from "./middleware/cors";
 import errorHandler from "./middleware/errorhandler.ts";
 import bodyParser from "./middleware/bodyParser";
+import logger from "./middleware/logger";
+import rateLimit from "./middleware/rateLimit";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -41,45 +43,12 @@ app.use(corsMiddleware);
 app.use(bodyParser);
 
 // Request logging in dev
+
 if (isDev) {
-  app.use(async (ctx, next) => {
-    const start = Date.now();
-    await next();
-    const ms = Date.now() - start;
-    console.log(`${ctx.method} ${ctx.path} ${ctx.status} - ${ms}ms`);
-  });
+  app.use(logger);
 }
 
-// ─── Rate Limiting (simple in-memory) ────────────────────────────────────────
-
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-app.use(async (ctx, next) => {
-  if (!ctx.path.startsWith("/api/auth")) return next();
-
-  const ip = ctx.ip || "unknown";
-  const now = Date.now();
-  const windowMs = 15 * 60 * 1000; // 15 min
-  const maxRequests = 20;
-
-  let entry = rateLimitMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    entry = { count: 0, resetAt: now + windowMs };
-    rateLimitMap.set(ip, entry);
-  }
-
-  entry.count++;
-
-  if (entry.count > maxRequests) {
-    ctx.status = 429;
-    ctx.body = { error: "Too many requests, please try again later" };
-    return;
-  }
-
-  ctx.set("X-RateLimit-Limit", String(maxRequests));
-  ctx.set("X-RateLimit-Remaining", String(Math.max(0, maxRequests - entry.count)));
-  await next();
-});
+app.use(rateLimit);
 
 // ─── WebSocket Server ─────────────────────────────────────────────────────────
 
@@ -138,11 +107,11 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(PORT, () => {
   console.log(`
-  ╔══════════════════════════════════════╗
-  ║     💬 Messaging App                 ║
-  ║     http://localhost:${PORT}            ║
-  ║     ws://localhost:${PORT}/ws           ║
-  ╚══════════════════════════════════════╝
+  
+  Server is running on:               
+      http://localhost:${PORT}            
+      ws://localhost:${PORT}/ws          
+
   `);
 });
 
