@@ -1,0 +1,10 @@
+[install]
+# Use exact versions for reproducible installs
+exact = false
+
+[run]
+# Bun will use this tsconfig
+bun = true
+
+[test]
+preload = []
