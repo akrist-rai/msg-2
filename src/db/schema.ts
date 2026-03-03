@@ -31,6 +31,7 @@ export const attachmentTypeEnum = pgEnum("attachment_type", [
   "audio",
   "document",
 ]);
+export const relationTypeEnum = pgEnum("relation_type", ["friend", "fof"]);
 /**   refrence for message attachments:
  * Attachment categories — used to decide how the frontend renders the file.
  * "image"    → show inline <img>
@@ -247,6 +248,38 @@ export const refreshTokens = pgTable("refresh_tokens", {
     .notNull(),
 });
 
+// ─── Network Relations ───────────────────────────────────────────────────────
+// "relation" is the canonical source for the network graph shown in Home view.
+// Rows are directional: user_id -> related_user_id.
+// friend: direct connection from user to related user.
+// fof: friend-of-friend edge; via_user_id stores the mutual friend path.
+export const relation = pgTable(
+  "relation",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    relatedUserId: uuid("related_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: relationTypeEnum("type").notNull(),
+    viaUserId: uuid("via_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // 0..100 closeness score used for node sizing in the graph UI.
+    strength: integer("strength").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueEdge: unique().on(t.userId, t.relatedUserId, t.type, t.viaUserId),
+    userIdx: index("relation_user_idx").on(t.userId),
+    relatedIdx: index("relation_related_user_idx").on(t.relatedUserId),
+    typeIdx: index("relation_type_idx").on(t.type),
+  })
+);
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -256,6 +289,9 @@ export const usersRelations = relations(users, ({ many }) => ({
   refreshTokens: many(refreshTokens),
   messageReads:  many(messageReads),
   attachments:   many(attachments),
+  outgoingRelations: many(relation, { relationName: "relation_user" }),
+  incomingRelations: many(relation, { relationName: "relation_related_user" }),
+  relationVia: many(relation, { relationName: "relation_via_user" }),
 }));
 
 export const roomsRelations = relations(rooms, ({ many, one }) => ({
@@ -297,6 +333,24 @@ export const reactionsRelations = relations(reactions, ({ one }) => ({
   user: one(users, { fields: [reactions.userId], references: [users.id] }),
 }));
 
+export const relationRelations = relations(relation, ({ one }) => ({
+  user: one(users, {
+    relationName: "relation_user",
+    fields: [relation.userId],
+    references: [users.id],
+  }),
+  relatedUser: one(users, {
+    relationName: "relation_related_user",
+    fields: [relation.relatedUserId],
+    references: [users.id],
+  }),
+  viaUser: one(users, {
+    relationName: "relation_via_user",
+    fields: [relation.viaUserId],
+    references: [users.id],
+  }),
+}));
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPORTED TYPES
 // $inferSelect → the shape of a row when you SELECT it
@@ -319,3 +373,4 @@ export type NewAttachment = typeof attachments.$inferInsert;
 export type MessageRead = typeof messageReads.$inferSelect;
 
 export type Reaction = typeof reactions.$inferSelect;
+export type Relation = typeof relation.$inferSelect;

@@ -29,6 +29,8 @@ const loginSchema = z.object({
   username: z.string(),
   password: z.string(),
 });
+// Lower default rounds in development to keep API latency snappy.
+const passwordHashRounds = Number(process.env.BCRYPT_ROUNDS) || (process.env.NODE_ENV === "production" ? 12 : 8);
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 
@@ -43,10 +45,15 @@ authRouter.post("/register", async (ctx) => {
 
     const { username, displayName, email, password } = result.data;
 
-    // Check uniqueness
-    const existing = await db.query.users.findFirst({
-      where: eq(schema.users.username, username.toLowerCase()),
-    });
+    // Check uniqueness in parallel to reduce registration latency.
+    const [existing, existingEmail] = await Promise.all([
+      db.query.users.findFirst({
+        where: eq(schema.users.username, username.toLowerCase()),
+      }),
+      db.query.users.findFirst({
+        where: eq(schema.users.email, email.toLowerCase()),
+      }),
+    ]);
 
     if (existing) {
       ctx.status = 409;
@@ -54,17 +61,13 @@ authRouter.post("/register", async (ctx) => {
       return;
     }
 
-    const existingEmail = await db.query.users.findFirst({
-      where: eq(schema.users.email, email.toLowerCase()),
-    });
-
     if (existingEmail) {
       ctx.status = 409;
       ctx.body = { error: "Email already registered" };
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, passwordHashRounds);
 
     const [user] = await db
       .insert(schema.users)

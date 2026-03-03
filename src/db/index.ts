@@ -29,24 +29,24 @@ const queryClient = postgres(connectionString, {
   ssl: resolveDbSslMode(connectionString),
 });
 
-export const db = drizzle(queryClient, { schema, logger: process.env.NODE_ENV !== "production" });
+const enableQueryLogs = process.env.DB_LOG_QUERIES === "true";
+export const db = drizzle(queryClient, { schema, logger: enableQueryLogs });
 
 // ─── Supabase Client (for Storage, Auth helpers, Realtime if needed) ──────────
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
-}
-
-// Service-role client: bypasses RLS - use only server-side
-export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+// Optional: only needed when using Supabase Storage for attachments.
+export const supabase =
+  supabaseUrl && supabaseServiceKey
+    ? createClient(supabaseUrl, supabaseServiceKey, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      })
+    : null;
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 

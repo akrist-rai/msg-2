@@ -161,6 +161,13 @@ roomsRouter.post("/dm/:targetUserId", requireAuth, async (ctx) => {
 
   if (existing.length > 0) {
     const room = await db.query.rooms.findFirst({ where: eq(schema.rooms.id, (existing[0] as any).id) });
+    await db
+      .insert(schema.relation)
+      .values([
+        { userId: myId, relatedUserId: targetUserId, type: "friend", viaUserId: targetUserId, strength: 1 },
+        { userId: targetUserId, relatedUserId: myId, type: "friend", viaUserId: myId, strength: 1 },
+      ])
+      .onConflictDoNothing();
     ctx.body = { room, existing: true };
     return;
   }
@@ -170,6 +177,13 @@ roomsRouter.post("/dm/:targetUserId", requireAuth, async (ctx) => {
     { roomId: room.id, userId: myId, role: "member" },
     { roomId: room.id, userId: targetUserId, role: "member" },
   ]);
+  await db
+    .insert(schema.relation)
+    .values([
+      { userId: myId, relatedUserId: targetUserId, type: "friend", viaUserId: targetUserId, strength: 1 },
+      { userId: targetUserId, relatedUserId: myId, type: "friend", viaUserId: myId, strength: 1 },
+    ])
+    .onConflictDoNothing();
 
   ctx.status = 201;
   ctx.body = { room, targetUser, existing: false };

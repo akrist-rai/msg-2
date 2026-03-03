@@ -66,6 +66,33 @@ export class WebSocketServer {
       username: payload.username,
       rooms: new Set(),
     };
+    let initialized = false;
+
+    ws.on("close", () => {
+      this.handleDisconnect(client);
+    });
+
+    ws.on("error", (err) => {
+      console.error(`WS error for ${client.username}:`, err.message);
+    });
+
+    ws.on("message", (data: Buffer) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (!initialized) {
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              payload: "Connection is initializing. Wait for type=connected before sending events.",
+            })
+          );
+          return;
+        }
+        this.handleMessage(client, msg);
+      } catch {
+        ws.send(JSON.stringify({ type: "error", payload: "Invalid JSON" }));
+      }
+    });
 
     // Register client
     if (!this.userClients.has(client.userId)) {
@@ -82,27 +109,20 @@ export class WebSocketServer {
         this.broadcastPresence(client.userId, true);
       });
 
-    // Auto-join all the user's rooms
-    this.joinUserRooms(client);
-
-    ws.send(JSON.stringify({ type: "connected", payload: { userId: client.userId } }));
-
-    ws.on("message", (data: Buffer) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        this.handleMessage(client, msg);
-      } catch {
-        ws.send(JSON.stringify({ type: "error", payload: "Invalid JSON" }));
-      }
-    });
-
-    ws.on("close", () => {
-      this.handleDisconnect(client);
-    });
-
-    ws.on("error", (err) => {
-      console.error(`WS error for ${client.username}:`, err.message);
-    });
+    // Complete room membership bootstrap before marking the socket ready.
+    this.joinUserRooms(client)
+      .then(() => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        initialized = true;
+        ws.send(JSON.stringify({ type: "connected", payload: { userId: client.userId } }));
+      })
+      .catch((err) => {
+        console.error("Failed to initialize WS client rooms:", err);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "error", payload: "Failed to initialize connection" }));
+        }
+        ws.close(1011, "Initialization failure");
+      });
   }
 
   private async joinUserRooms(client: AuthenticatedClient) {
@@ -246,6 +266,15 @@ export class WebSocketServer {
       if (client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(json);
       }
+    }
+  }
+
+  stopTypingForUser(roomId: string, userId: string) {
+    const clients = this.userClients.get(userId);
+    if (!clients) return;
+    for (const client of clients) {
+      if (!client.rooms.has(roomId)) continue;
+      this.handleTypingStop(client, roomId);
     }
   }
 

@@ -4,6 +4,8 @@ import { eq, and, lt, desc, isNull, sql, inArray } from "drizzle-orm";
 import { db, schema, supabase } from "../db/index.ts";
 import { requireAuth } from "../middleware/auth.ts";
 import type { WebSocketServer } from "../ws/handler.ts";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 
 // ─── Helper: check room membership ───────────────────────────────────────────
 
@@ -45,10 +47,88 @@ function getFirstFile(files: any): any | null {
   return Array.isArray(first) ? first[0] ?? null : first;
 }
 
+function safeExt(filename: string): string {
+  const ext = path.extname(filename || "").toLowerCase();
+  return /^[a-z0-9.]{0,12}$/.test(ext) ? ext : "";
+}
+
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createMessagesRouter(wss?: WebSocketServer) {
   const router = new Router({ prefix: "/rooms/:roomId/messages" });
+
+  // ─── GET /poll (REDIRECT TO WEBSOCKET) ─────────────────────────────────────
+  
+  router.get("/poll", requireAuth, async (ctx) => {
+    const { roomId } = ctx.params;
+    const token = ctx.headers.authorization?.split(' ')[1];
+    const wsProtocol = ctx.protocol === "https" ? "wss" : "ws";
+    
+    // Check if user is a member
+    const membership = await assertMember(roomId, ctx.state.userId);
+    if (!membership) {
+      ctx.status = 403;
+      ctx.body = { error: "Not a member of this room" };
+      return;
+    }
+
+    // Return 426 Upgrade Required with WebSocket connection info
+    ctx.status = 426;
+    ctx.set('Upgrade', 'websocket');
+    ctx.body = {
+      error: "Long polling is not supported. Please use WebSocket for real-time messages.",
+      upgrade: {
+        protocol: "websocket",
+        url: `${wsProtocol}://${ctx.host}/ws?token=${token}`,
+        documentation: "/docs/websocket",
+        events: [
+          "message:new",
+          "message:edited",
+          "message:deleted",
+          "message:reaction",
+          "typing:start",
+          "typing:stop"
+        ],
+        example: {
+          javascript: `
+	const ws = new WebSocket('${wsProtocol}://${ctx.host}/ws?token=${token}');
+ws.onmessage = (event) => {
+  const { type, payload } = JSON.parse(event.data);
+  if (type === 'message:new' && payload.roomId === '${roomId}') {
+    console.log('New message:', payload);
+  }
+};
+          `.trim()
+        }
+      }
+    };
+  });
+
+  // ─── GET /stream (REDIRECT TO WEBSOCKET) ───────────────────────────────────
+  
+  router.get("/stream", requireAuth, async (ctx) => {
+    const { roomId } = ctx.params;
+    const token = ctx.headers.authorization?.split(' ')[1];
+    const wsProtocol = ctx.protocol === "https" ? "wss" : "ws";
+    
+    const membership = await assertMember(roomId, ctx.state.userId);
+    if (!membership) {
+      ctx.status = 403;
+      ctx.body = { error: "Not a member of this room" };
+      return;
+    }
+
+    ctx.status = 426;
+    ctx.set('Upgrade', 'websocket');
+    ctx.body = {
+      error: "Server-Sent Events are not supported. Use WebSocket.",
+      upgrade: {
+        protocol: "websocket",
+        url: `${wsProtocol}://${ctx.host}/ws?token=${token}`,
+        roomId: roomId
+      }
+    };
+  });
 
   // ─── POST /attachments  (upload file and create pending attachment) ─────────
 
@@ -71,33 +151,44 @@ export function createMessagesRouter(wss?: WebSocketServer) {
     const mimeType = file.mimetype || "application/octet-stream";
     const filename = file.originalFilename || file.newFilename || "upload.bin";
     const attachmentType = inferAttachmentType(mimeType);
-    const extension =
-      filename.includes(".") && filename.lastIndexOf(".") > 0
-        ? filename.slice(filename.lastIndexOf("."))
-        : "";
-    const storagePath = `${ctx.state.userId}/${Date.now()}-${crypto.randomUUID()}${extension}`;
+    const extension = safeExt(filename);
+    const objectName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+    let storagePath = `${ctx.state.userId}/${objectName}`;
 
     const fileBytes = await Bun.file(file.filepath).arrayBuffer();
-    const bucket = process.env.SUPABASE_STORAGE_BUCKET || "attachments";
+    let publicUrl = "";
 
-    let uploadResult = await supabase.storage
-      .from(bucket)
-      .upload(storagePath, fileBytes, { contentType: mimeType, upsert: false });
+    if (supabase) {
+      const bucket = process.env.SUPABASE_STORAGE_BUCKET || "attachments";
 
-    if (uploadResult.error && /bucket not found/i.test(uploadResult.error.message)) {
-      await supabase.storage.createBucket(bucket, { public: true });
-      uploadResult = await supabase.storage
+      let uploadResult = await supabase.storage
         .from(bucket)
         .upload(storagePath, fileBytes, { contentType: mimeType, upsert: false });
-    }
 
-    if (uploadResult.error) {
-      ctx.status = 500;
-      ctx.body = { error: `Upload failed: ${uploadResult.error.message}` };
-      return;
-    }
+      if (uploadResult.error && /bucket not found/i.test(uploadResult.error.message)) {
+        await supabase.storage.createBucket(bucket, { public: true });
+        uploadResult = await supabase.storage
+          .from(bucket)
+          .upload(storagePath, fileBytes, { contentType: mimeType, upsert: false });
+      }
 
-    const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+      if (uploadResult.error) {
+        ctx.status = 500;
+        ctx.body = { error: `Upload failed: ${uploadResult.error.message}` };
+        return;
+      }
+
+      const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+      publicUrl = publicData.publicUrl;
+    } else {
+      // Neon-only setup fallback: store attachments on local disk under /public/uploads.
+      const relativePath = path.posix.join("uploads", ctx.state.userId, objectName);
+      const absolutePath = path.join(process.cwd(), "public", ...relativePath.split("/"));
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await Bun.write(absolutePath, fileBytes);
+      storagePath = relativePath;
+      publicUrl = `${ctx.origin}/${relativePath}`;
+    }
 
     const [attachment] = await db
       .insert(schema.attachments)
@@ -106,7 +197,7 @@ export function createMessagesRouter(wss?: WebSocketServer) {
         uploaderId: ctx.state.userId,
         attachmentType,
         storagePath,
-        publicUrl: publicData.publicUrl,
+        publicUrl,
         filename,
         mimeType,
         size: Number(file.size || fileBytes.byteLength),
@@ -165,30 +256,34 @@ export function createMessagesRouter(wss?: WebSocketServer) {
     const hasMore = msgs.length > limit;
     if (hasMore) msgs.pop();
 
-    if (msgs.length > 0) {
-      await db
-        .insert(schema.messageReads)
-        .values(
-          msgs.map((m) => ({
-            messageId: m.id,
-            userId: ctx.state.userId,
-            readAt: new Date(),
-          }))
-        )
-        .onConflictDoNothing({
-          target: [schema.messageReads.messageId, schema.messageReads.userId],
-        });
-    }
-
-    await db
+    const readAt = new Date();
+    const markReadsTask =
+      msgs.length > 0
+        ? db
+            .insert(schema.messageReads)
+            .values(
+              msgs.map((m) => ({
+                messageId: m.id,
+                userId: ctx.state.userId,
+                readAt,
+              }))
+            )
+            .onConflictDoNothing({
+              target: [schema.messageReads.messageId, schema.messageReads.userId],
+            })
+        : Promise.resolve();
+    const clearUnreadTask = db
       .update(schema.roomMembers)
-      .set({ unreadCount: 0, lastReadAt: new Date() })
+      .set({ unreadCount: 0, lastReadAt: readAt })
       .where(
         and(
           eq(schema.roomMembers.roomId, roomId),
           eq(schema.roomMembers.userId, ctx.state.userId)
         )
       );
+    void Promise.all([markReadsTask, clearUnreadTask]).catch((err) => {
+      console.error("Failed to update read state:", err);
+    });
 
     ctx.body = {
       messages: msgs.reverse(),
@@ -245,19 +340,84 @@ export function createMessagesRouter(wss?: WebSocketServer) {
         );
     }
 
-    await db
+    void db
       .insert(schema.messageReads)
       .values({ messageId: message.id, userId: ctx.state.userId, readAt: new Date() })
       .onConflictDoNothing({
         target: [schema.messageReads.messageId, schema.messageReads.userId],
+      })
+      .catch((err) => {
+        console.error("Failed to mark sender read state:", err);
       });
 
-    await db.execute(sql`
-      UPDATE room_members
-      SET unread_count = unread_count + 1
-      WHERE room_id = ${roomId}
-      AND user_id != ${ctx.state.userId}
-    `);
+    void db
+      .execute(sql`
+        UPDATE room_members
+        SET unread_count = unread_count + 1
+        WHERE room_id = ${roomId}
+        AND user_id != ${ctx.state.userId}
+      `)
+      .catch((err) => {
+        console.error("Failed to increment unread counts:", err);
+      });
+
+    void (async () => {
+      // Keep relation.strength aligned with direct-message activity.
+      const room = await db.query.rooms.findFirst({
+        where: eq(schema.rooms.id, roomId),
+        columns: { id: true, type: true },
+      });
+      if (!room || room.type !== "direct") return;
+
+      const members = await db.query.roomMembers.findMany({
+        where: eq(schema.roomMembers.roomId, roomId),
+        columns: { userId: true },
+      });
+      if (members.length !== 2) return;
+
+      const senderId = ctx.state.userId;
+      const otherId = members.find((m) => m.userId !== senderId)?.userId;
+      if (!otherId) return;
+
+      const countRow = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.messages)
+        .where(and(eq(schema.messages.roomId, roomId), isNull(schema.messages.deletedAt)));
+      const messageCount = Number(countRow[0]?.count || 0);
+      const strength = Math.max(1, Math.min(100, messageCount));
+
+      await db
+        .insert(schema.relation)
+        .values([
+          {
+            userId: senderId,
+            relatedUserId: otherId,
+            type: "friend",
+            viaUserId: otherId,
+            strength,
+            updatedAt: new Date(),
+          },
+          {
+            userId: otherId,
+            relatedUserId: senderId,
+            type: "friend",
+            viaUserId: senderId,
+            strength,
+            updatedAt: new Date(),
+          },
+        ])
+        .onConflictDoUpdate({
+          target: [
+            schema.relation.userId,
+            schema.relation.relatedUserId,
+            schema.relation.type,
+            schema.relation.viaUserId,
+          ],
+          set: { strength, updatedAt: new Date() },
+        });
+    })().catch((err) => {
+      console.error("Failed to update relation strength:", err);
+    });
 
     const fullMessage = await db.query.messages.findFirst({
       where: eq(schema.messages.id, message.id),
@@ -281,7 +441,16 @@ export function createMessagesRouter(wss?: WebSocketServer) {
       },
     });
 
-    wss?.broadcastToRoom(roomId, { type: "message:new", payload: fullMessage });
+    // Broadcast to room via WebSocket
+    if (wss) {
+      wss.broadcastToRoom(roomId, { 
+        type: "message:new", 
+        payload: fullMessage 
+      });
+
+      // Auto-stop typing indicator for sender and clear typing timer.
+      wss.stopTypingForUser(roomId, ctx.state.userId);
+    }
 
     ctx.status = 201;
     ctx.body = { message: fullMessage };
@@ -290,7 +459,7 @@ export function createMessagesRouter(wss?: WebSocketServer) {
   // ─── PATCH /:messageId  (edit) ──────────────────────────────────────────────
 
   router.patch("/:messageId", requireAuth, async (ctx) => {
-    const { messageId } = ctx.params;
+    const { messageId, roomId } = ctx.params;
 
     const message = await db.query.messages.findFirst({
       where: eq(schema.messages.id, messageId),
@@ -321,15 +490,35 @@ export function createMessagesRouter(wss?: WebSocketServer) {
       .where(eq(schema.messages.id, messageId))
       .returning();
 
-    wss?.broadcastToRoom(message.roomId, { type: "message:edited", payload: updated });
+    // Get full message with relations
+    const fullMessage = await db.query.messages.findFirst({
+      where: eq(schema.messages.id, messageId),
+      with: {
+        sender: {
+          columns: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
+        reactions: {
+          with: { user: { columns: { id: true, username: true } } },
+        },
+        attachments: true,
+      },
+    });
 
-    ctx.body = { message: updated };
+    // Broadcast edit event via WebSocket
+    if (wss) {
+      wss.broadcastToRoom(message.roomId, { 
+        type: "message:edited", 
+        payload: fullMessage 
+      });
+    }
+
+    ctx.body = { message: fullMessage };
   });
 
   // ─── DELETE /:messageId  (soft delete) ─────────────────────────────────────
 
   router.delete("/:messageId", requireAuth, async (ctx) => {
-    const { messageId } = ctx.params;
+    const { messageId, roomId } = ctx.params;
 
     const message = await db.query.messages.findFirst({
       where: eq(schema.messages.id, messageId),
@@ -355,10 +544,13 @@ export function createMessagesRouter(wss?: WebSocketServer) {
       .set({ deletedAt: new Date() })
       .where(eq(schema.messages.id, messageId));
 
-    wss?.broadcastToRoom(message.roomId, {
-      type: "message:deleted",
-      payload: { messageId, roomId: message.roomId },
-    });
+    // Broadcast delete event via WebSocket
+    if (wss) {
+      wss.broadcastToRoom(message.roomId, {
+        type: "message:deleted",
+        payload: { messageId, roomId: message.roomId },
+      });
+    }
 
     ctx.body = { success: true };
   });
@@ -401,12 +593,71 @@ export function createMessagesRouter(wss?: WebSocketServer) {
       with: { user: { columns: { id: true, username: true } } },
     });
 
-    wss?.broadcastToRoom(roomId, {
-      type: "message:reaction",
-      payload: { messageId, reactions },
-    });
+    // Broadcast reaction update via WebSocket
+    if (wss) {
+      wss.broadcastToRoom(roomId, {
+        type: "message:reaction",
+        payload: { messageId, reactions },
+      });
+    }
 
     ctx.body = { reactions, removed: !!existing };
+  });
+
+  // ─── POST /typing/start  (typing indicator) ────────────────────────────────
+
+  router.post("/typing/start", requireAuth, async (ctx) => {
+    const { roomId } = ctx.params;
+    
+    const membership = await assertMember(roomId, ctx.state.userId);
+    if (!membership) {
+      ctx.status = 403;
+      ctx.body = { error: "Not a member" };
+      return;
+    }
+
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.id, ctx.state.userId),
+      columns: { id: true, username: true, displayName: true }
+    });
+
+    if (wss && user) {
+      wss.broadcastToRoom(roomId, {
+        type: "typing:start",
+        payload: {
+          userId: user.id,
+          username: user.displayName || user.username,
+          roomId
+        }
+      });
+    }
+
+    ctx.status = 204;
+  });
+
+  // ─── POST /typing/stop  (stop typing indicator) ────────────────────────────
+
+  router.post("/typing/stop", requireAuth, async (ctx) => {
+    const { roomId } = ctx.params;
+    
+    const membership = await assertMember(roomId, ctx.state.userId);
+    if (!membership) {
+      ctx.status = 403;
+      ctx.body = { error: "Not a member" };
+      return;
+    }
+
+    if (wss) {
+      wss.broadcastToRoom(roomId, {
+        type: "typing:stop",
+        payload: {
+          userId: ctx.state.userId,
+          roomId
+        }
+      });
+    }
+
+    ctx.status = 204;
   });
 
   return router;

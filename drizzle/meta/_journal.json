@@ -15,6 +15,13 @@
       "when": 1772523013115,
       "tag": "0001_busy_blink",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772640000000,
+      "tag": "0002_relation_network",
+      "breakpoints": true
     }
   ]
 }
