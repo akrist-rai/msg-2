@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Untitled UI - Messages</title>
+<title>msg</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
 <style>
   /* ─── RESET & BASE ─────────────────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -756,7 +757,7 @@
   .toast.error { border-left: 4px solid #f04438; }
 
   /* Misc helpers to hide elements that are purely structural */
-  #ws-status, #attachment-input, #palette-picker { display: none; }
+  #socket-status, #attachment-input, #palette-picker { display: none; }
 </style>
 </head>
 <body>
@@ -765,7 +766,7 @@
   <aside id="nav-rail">
     <div class="rail-brand">
       <div class="rail-cube">◫</div>
-      <span>Untitled UI</span>
+      <span>msg</span>
     </div>
     <nav class="rail-nav">
       <button class="rail-item" id="nav-network-btn"><span class="rail-icon">⌂</span> Network</button>
@@ -921,7 +922,7 @@ const API = `${BACKEND_ORIGIN}/api`;
 let state = {
   user: null, accessToken: null, refreshToken: null, rooms: [], currentRoomId: null,
   messages: [], hasMore: false, cursor: null, loadingMessages: false, replyTo: null,
-  typingUsers: {}, ws: null, editingMessageId: null, pendingAttachments: [],
+  typingUsers: {}, socket: null, editingMessageId: null, pendingAttachments: [],
 };
 
 // --- VIEW MANAGEMENT ---
@@ -1144,7 +1145,7 @@ function toast(msg, type = 'info') {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// AUTH & WS
+// AUTH & SOCKET.IO
 // ════════════════════════════════════════════════════════════════════════
 async function login(username, password) {
   try {
@@ -1161,34 +1162,56 @@ async function register(username, displayName, email, password) {
   } catch (err) { showError(err.error || 'Registration failed'); }
 }
 function logout() {
-  if (state.ws) state.ws.close();
+  if (state.socket) state.socket.disconnect();
   state = { ...state, user: null, accessToken: null, refreshToken: null, rooms: [], currentRoomId: null, messages: [] };
   saveAuth(); document.getElementById('auth-modal').style.display = 'flex';
 }
 
-function connectWS() {
-  if (state.ws && state.ws.readyState < 2) return;
-  const wsHost = BACKEND_ORIGIN.replace(/^http/, 'ws');
-  state.ws = new WebSocket(`${wsHost}/ws?token=${state.accessToken}`);
-  state.ws.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'message:new') {
-        if (msg.payload.roomId === state.currentRoomId) {
-          addMessageToView(msg.payload, true);
-          scrollToBottom();
-        } else {
-          const room = state.rooms.find((r) => r.id === msg.payload.roomId);
-          if (room) {
-            room.unreadCount = Number(room.unreadCount || 0) + 1;
-            renderSidebar();
-          }
-        }
+function connectSocket() {
+  if (state.socket?.connected) return;
+  const socket = io(BACKEND_ORIGIN, {
+    path: '/socket.io',
+    auth: { token: state.accessToken },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+  });
+  state.socket = socket;
+
+  socket.on('message:new', (payload) => {
+    if (!payload) return;
+    if (payload.roomId === state.currentRoomId) {
+      addMessageToView(payload, true);
+      scrollToBottom();
+    } else {
+      const room = state.rooms.find((r) => r.id === payload.roomId);
+      if (room) {
+        room.unreadCount = Number(room.unreadCount || 0) + 1;
+        renderSidebar();
       }
-      if (msg.type === 'presence') updatePresence(msg.payload.userId, msg.payload.isOnline);
-    } catch {}
-  };
-  state.ws.onclose = () => { if (state.accessToken) setTimeout(connectWS, 3000); };
+    }
+  });
+
+  socket.on('message:edited', (payload) => {
+    if (!payload?.id) return;
+    const idx = state.messages.findIndex((m) => m.id === payload.id);
+    if (idx >= 0) {
+      state.messages[idx] = payload;
+      renderMessages();
+    }
+  });
+
+  socket.on('message:deleted', (payload) => {
+    if (!payload?.messageId) return;
+    const idx = state.messages.findIndex((m) => m.id === payload.messageId);
+    if (idx >= 0) {
+      state.messages[idx] = { ...state.messages[idx], deletedAt: new Date().toISOString(), content: '' };
+      renderMessages();
+    }
+  });
+
+  socket.on('presence', (payload) => {
+    if (payload?.userId) updatePresence(payload.userId, payload.isOnline);
+  });
 }
 
 function updatePresence(userId, isOnline) {
@@ -1342,7 +1365,7 @@ async function loadMessages() {
   if (!state.currentRoomId) return;
   try {
     const data = await apiGet(`/rooms/${state.currentRoomId}/messages?limit=50`);
-    state.messages = data.messages.reverse(); 
+    state.messages = data.messages;
     renderMessages();
   } catch (err) { toast('Failed to load messages', 'error'); }
 }
@@ -1396,18 +1419,17 @@ function createMessageEl(msg, prevMsg = null) {
   let attachmentsHtml = '';
   if (msg.attachments && msg.attachments.length > 0) {
     attachmentsHtml = `<div class="msg-attachments">` + msg.attachments.map(att => {
-      const rawName = att.filename || att.fileName || att.originalFilename || att.name || 'Attachment';
-      const rawUrl = att.url || att.publicUrl || att.public_url || att.fileUrl || att.file_url
-        || (att.storagePath || att.storage_path ? `${location.origin}/${String(att.storagePath || att.storage_path).replace(/^\/+/, '')}` : '');
-      const rawMime = att.mimeType || att.mime_type || '';
-      const rawType = att.attachmentType || att.attachment_type || '';
-      const name = esc(rawName);
-      const url = esc(rawUrl || '#');
-      const isImg = String(rawType) === 'image' || String(rawMime).startsWith('image/');
-      if (isImg && rawUrl) {
+      const name = esc(att.filename || 'Attachment');
+      const publicUrl = String(att.publicUrl || '');
+      const mimeType = String(att.mimeType || '');
+      const attachmentType = String(att.attachmentType || 'document');
+      const url = esc(publicUrl || '#');
+      const isImg = attachmentType === 'image' || mimeType.startsWith('image/');
+
+      if (isImg && publicUrl) {
         return `<a href="${url}" target="_blank" rel="noopener noreferrer"><img class="msg-attachment-image" src="${url}" alt="${name}"></a>`;
       }
-      if (!rawUrl) {
+      if (!publicUrl) {
         return `
         <div class="file-card">
           <div class="file-icon">📄</div>
@@ -1422,7 +1444,7 @@ function createMessageEl(msg, prevMsg = null) {
           <div class="file-icon">📄</div>
           <div class="file-info">
             <div class="file-name">${name}</div>
-            <div class="file-meta">${esc(rawType || 'Document')}</div>
+            <div class="file-meta">${esc(attachmentType || 'document')}</div>
           </div>
         </a>`;
     }).join('') + `</div>`;
@@ -1455,6 +1477,22 @@ function addMessageToView(msg, isNew = false) {
   state.messages.push(msg);
 }
 
+function renderPendingAttachments() {
+  const holder = document.getElementById('pending-attachments');
+  if (!holder) return;
+  if (!state.pendingAttachments.length) {
+    holder.style.display = 'none';
+    holder.innerHTML = '';
+    return;
+  }
+  holder.style.display = 'flex';
+  holder.innerHTML = state.pendingAttachments.map((att) => {
+    const name = esc(att.filename || 'Attachment');
+    const type = esc(att.attachmentType || 'document');
+    return `<div style="background:#f2f4f7; padding:4px 8px; border-radius:4px; font-size:12px;">${name} · ${type}</div>`;
+  }).join('');
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // INTERACTIONS
 // ════════════════════════════════════════════════════════════════════════
@@ -1466,11 +1504,11 @@ async function sendMessage() {
   const payload = { content, attachmentIds: state.pendingAttachments.map(a => a.id) };
   input.value = '';
   state.pendingAttachments = [];
-  document.getElementById('pending-attachments').style.display = 'none';
+  renderPendingAttachments();
 
   try {
     const res = await apiPost(`/rooms/${state.currentRoomId}/messages`, payload);
-    if (state.ws?.readyState !== WebSocket.OPEN && res?.message) {
+    if (!state.socket?.connected && res?.message) {
       addMessageToView(res.message, true);
       scrollToBottom();
     }
@@ -1505,9 +1543,7 @@ document.getElementById('attachment-input').addEventListener('change', async (e)
       const data = await apiUploadAttachment(file);
       if (data?.attachment) {
         state.pendingAttachments.push(data.attachment);
-        const holder = document.getElementById('pending-attachments');
-        holder.style.display = 'flex';
-        holder.innerHTML += `<div style="background:#f2f4f7; padding:4px 8px; border-radius:4px; font-size:12px;">${esc(data.attachment.filename)}</div>`;
+        renderPendingAttachments();
       }
     } catch (err) { toast('Upload failed', 'error'); }
   }
@@ -1533,7 +1569,7 @@ function showError(msg) { const el = document.getElementById('auth-error'); el.t
 async function onAuthenticated() {
   document.getElementById('auth-modal').style.display = 'none';
   await loadRooms();
-  connectWS();
+  connectSocket();
 }
 document.getElementById('logout-btn').addEventListener('click', logout);
 document.getElementById('nav-notifications-btn').addEventListener('click', () => {

@@ -4,7 +4,7 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { WebSocketServer } from "./ws/handler.ts";
+import { RealtimeServer } from "./realtime/socketio.ts";
 import createApiRouter from "./routes";
 
 //seting up middleware
@@ -35,13 +35,13 @@ if (isDev) {
   app.use(logger);
 }
 app.use(rateLimit);
-// ─── WebSocket Server ─────────────────────────────────────────────────────────
+// ─── Socket.IO Server ─────────────────────────────────────────────────────────
 
-const wss = new WebSocketServer();
+const realtime = new RealtimeServer();
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-const apiRouter = createApiRouter(wss);
+const apiRouter = createApiRouter(realtime);
 app.use(apiRouter.routes());
 app.use(apiRouter.allowedMethods());
 
@@ -52,7 +52,7 @@ app.use(serve(publicDir));
 
 // SPA fallback: serve index.html for non-API routes
 app.use(async (ctx) => {
-  if (!ctx.path.startsWith("/api") && !ctx.path.startsWith("/ws")) {
+  if (!ctx.path.startsWith("/api") && !ctx.path.startsWith("/socket.io")) {
     ctx.type = "html";
     ctx.body = Bun.file(path.join(publicDir, "index.html"));
   }
@@ -61,22 +61,14 @@ app.use(async (ctx) => {
 // ─── HTTP Server ──────────────────────────────────────────────────────────────
 
 const server = createServer(app.callback());
-
-// WebSocket upgrade
-server.on("upgrade", (req, socket, head) => {
-  if (req.url?.startsWith("/ws")) {
-    wss.handleUpgrade(req, socket, head);
-  } else {
-    socket.destroy();
-  }
-});
+realtime.attach(server);
 
 server.listen(PORT, () => {
   console.log(`
   
   Server is running on:               
       http://localhost:${PORT}            
-      ws://localhost:${PORT}/ws?token=<access_token>          
+      socket.io path: /socket.io (auth token required)         
 
   `);
 });

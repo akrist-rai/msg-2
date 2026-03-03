@@ -4,9 +4,9 @@ import { authRouter } from "./auth";
 import { roomsRouter } from "./rooms";
 import { createMessagesRouter } from "./messages";
 import { socialRouter } from "./social";
-import type { WebSocketServer } from "../ws/handler.ts";
+import type { RealtimeServer } from "../realtime/socketio.ts";
 
-export default function createApiRouter(wss: WebSocketServer) {
+export default function createApiRouter(realtime: RealtimeServer) {
   const router = new Router({ prefix: "/api" });
 
   router.use(healthRouter.routes());
@@ -14,7 +14,7 @@ export default function createApiRouter(wss: WebSocketServer) {
   router.use(roomsRouter.routes(), roomsRouter.allowedMethods());
   router.use(socialRouter.routes(), socialRouter.allowedMethods());
 
-  const messagesRouter = createMessagesRouter(wss);
+  const messagesRouter = createMessagesRouter(realtime);
   router.use(messagesRouter.routes(), messagesRouter.allowedMethods());
 
   return router;

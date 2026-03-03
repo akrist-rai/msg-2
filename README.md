@@ -1,6 +1,6 @@
 # msg. — Minimal Messaging App
 
-A real-time messaging application built with **Koa + Bun**, **Supabase**, and **Drizzle ORM**.
+A real-time messaging application built with **Koa + Bun**, **Socket.IO**, and **Drizzle ORM**.
 
 ## Stack
 
@@ -8,7 +8,7 @@ A real-time messaging application built with **Koa + Bun**, **Supabase**, and **
 |-------|------|
 | Runtime | [Bun](https://bun.sh) |
 | HTTP Server | [Koa](https://koajs.com) + @koa/router |
-| WebSocket | [ws](https://github.com/websockets/ws) |
+| Realtime | [Socket.IO](https://socket.io/) |
 | Database | [Supabase](https://supabase.com) (Postgres) |
 | ORM | [Drizzle ORM](https://orm.drizzle.team) |
 | Validation | [Zod](https://zod.dev) |
@@ -17,7 +17,7 @@ A real-time messaging application built with **Koa + Bun**, **Supabase**, and **
 ## Features
 
 - 🔐 JWT auth with refresh token rotation
-- 💬 Real-time messaging via WebSockets
+- 💬 Real-time messaging via Socket.IO
 - 👥 Group rooms + Direct messages
 - ✏️ Edit & delete messages
 - ↩️ Message replies
@@ -105,27 +105,20 @@ Open http://localhost:3000
 | DELETE | `/api/rooms/:id/messages/:msgId` | Delete message |
 | POST | `/api/rooms/:id/messages/:msgId/react` | Toggle reaction |
 
-### WebSocket
+### Socket.IO
 
-Connect to `ws://localhost:3000/ws?token=<accessToken>`
+Connect to `http://localhost:3000` using path `/socket.io` and token auth:
 
-**Client → Server events:**
-```json
-{ "type": "typing:start", "payload": { "roomId": "..." } }
-{ "type": "typing:stop",  "payload": { "roomId": "..." } }
-{ "type": "ping" }
+```js
+const socket = io("http://localhost:3000", {
+  path: "/socket.io",
+  auth: { token: "<accessToken>" },
+});
 ```
 
-**Server → Client events:**
-```json
-{ "type": "message:new",      "payload": { ...message } }
-{ "type": "message:edited",   "payload": { ...message } }
-{ "type": "message:deleted",  "payload": { "messageId": "...", "roomId": "..." } }
-{ "type": "message:reaction", "payload": { "messageId": "...", "reactions": [...] } }
-{ "type": "typing:start",     "payload": { "userId": "...", "username": "...", "roomId": "..." } }
-{ "type": "typing:stop",      "payload": { "userId": "...", "roomId": "..." } }
-{ "type": "presence",         "payload": { "userId": "...", "isOnline": true } }
-```
+**Client events:** `typing:start`, `typing:stop`, `ping`
+
+**Server events:** `connected`, `message:new`, `message:edited`, `message:deleted`, `message:reaction`, `typing:start`, `typing:stop`, `presence`
 
 ## Database Schema
 
@@ -143,7 +136,7 @@ refresh_tokens → id, userId, token, expiresAt
 ```
 messaging-app/
 ├── src/
-│   ├── server.ts          # Koa app + HTTP server + WS upgrade
+│   ├── server.ts          # Koa app + HTTP server + Socket.IO attach
 │   ├── db/
 │   │   ├── index.ts       # Drizzle + Supabase clients
 │   │   └── schema.ts      # Full DB schema with relations
@@ -153,8 +146,8 @@ messaging-app/
 │   │   ├── auth.ts        # Auth endpoints
 │   │   ├── rooms.ts       # Room CRUD + DM
 │   │   └── messages.ts    # Message CRUD + reactions
-│   └── ws/
-│       └── handler.ts     # WebSocket server + presence + typing
+│   └── realtime/
+│       └── socketio.ts    # Socket.IO server + presence + typing
 ├── public/
 │   └── index.html         # SPA frontend (terminal-inspired UI)
 ├── drizzle.config.ts

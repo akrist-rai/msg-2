@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, and, lt, desc, isNull, sql, inArray } from "drizzle-orm";
 import { db, schema, supabase } from "../db/index.ts";
 import { requireAuth } from "../middleware/auth.ts";
-import type { WebSocketServer } from "../ws/handler.ts";
+import type { RealtimeServer } from "../realtime/socketio.ts";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -52,17 +52,50 @@ function safeExt(filename: string): string {
   return /^[a-z0-9.]{0,12}$/.test(ext) ? ext : "";
 }
 
+type AttachmentRow = typeof schema.attachments.$inferSelect;
+
+function toAbsolutePublicUrl(origin: string, rawUrl: string | null | undefined, storagePath: string | null | undefined) {
+  if (rawUrl && /^https?:\/\//i.test(rawUrl)) return rawUrl;
+  if (rawUrl) return `${origin}/${rawUrl.replace(/^\/+/, "")}`;
+  if (storagePath) return `${origin}/${storagePath.replace(/^\/+/, "")}`;
+  return "";
+}
+
+function serializeAttachment(attachment: AttachmentRow, origin: string) {
+  return {
+    id: attachment.id,
+    filename: attachment.filename,
+    publicUrl: toAbsolutePublicUrl(origin, attachment.publicUrl, attachment.storagePath),
+    mimeType: attachment.mimeType,
+    attachmentType: attachment.attachmentType,
+    size: Number(attachment.size || 0),
+    width: attachment.width ?? null,
+    height: attachment.height ?? null,
+    durationSeconds: attachment.durationSeconds ?? null,
+    createdAt: attachment.createdAt,
+  };
+}
+
+function serializeMessage(message: any, origin: string) {
+  if (!message) return message;
+  return {
+    ...message,
+    attachments: Array.isArray(message.attachments)
+      ? message.attachments.map((att: AttachmentRow) => serializeAttachment(att, origin))
+      : [],
+  };
+}
+
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
-export function createMessagesRouter(wss?: WebSocketServer) {
+export function createMessagesRouter(realtime?: RealtimeServer) {
   const router = new Router({ prefix: "/rooms/:roomId/messages" });
 
-  // ─── GET /poll (REDIRECT TO WEBSOCKET) ─────────────────────────────────────
+  // ─── GET /poll (REDIRECT TO SOCKET.IO) ─────────────────────────────────────
   
   router.get("/poll", requireAuth, async (ctx) => {
     const { roomId } = ctx.params;
     const token = ctx.headers.authorization?.split(' ')[1];
-    const wsProtocol = ctx.protocol === "https" ? "wss" : "ws";
     
     // Check if user is a member
     const membership = await assertMember(roomId, ctx.state.userId);
@@ -72,15 +105,14 @@ export function createMessagesRouter(wss?: WebSocketServer) {
       return;
     }
 
-    // Return 426 Upgrade Required with WebSocket connection info
+    // Return 426 Upgrade Required with Socket.IO connection info
     ctx.status = 426;
-    ctx.set('Upgrade', 'websocket');
     ctx.body = {
-      error: "Long polling is not supported. Please use WebSocket for real-time messages.",
+      error: "Long polling is not supported. Please use Socket.IO for real-time messages.",
       upgrade: {
-        protocol: "websocket",
-        url: `${wsProtocol}://${ctx.host}/ws?token=${token}`,
-        documentation: "/docs/websocket",
+        protocol: "socket.io",
+        url: `${ctx.origin}/socket.io`,
+        documentation: "/docs/socketio",
         events: [
           "message:new",
           "message:edited",
@@ -91,25 +123,23 @@ export function createMessagesRouter(wss?: WebSocketServer) {
         ],
         example: {
           javascript: `
-	const ws = new WebSocket('${wsProtocol}://${ctx.host}/ws?token=${token}');
-ws.onmessage = (event) => {
-  const { type, payload } = JSON.parse(event.data);
-  if (type === 'message:new' && payload.roomId === '${roomId}') {
-    console.log('New message:', payload);
+const socket = io('${ctx.origin}', { auth: { token: '${token}' } });
+socket.on('message:new', (payload) => {
+  if (payload.roomId === '${roomId}') {
+    console.log('New message', payload);
   }
-};
+});
           `.trim()
         }
       }
     };
   });
 
-  // ─── GET /stream (REDIRECT TO WEBSOCKET) ───────────────────────────────────
+  // ─── GET /stream (REDIRECT TO SOCKET.IO) ───────────────────────────────────
   
   router.get("/stream", requireAuth, async (ctx) => {
     const { roomId } = ctx.params;
     const token = ctx.headers.authorization?.split(' ')[1];
-    const wsProtocol = ctx.protocol === "https" ? "wss" : "ws";
     
     const membership = await assertMember(roomId, ctx.state.userId);
     if (!membership) {
@@ -119,12 +149,11 @@ ws.onmessage = (event) => {
     }
 
     ctx.status = 426;
-    ctx.set('Upgrade', 'websocket');
     ctx.body = {
-      error: "Server-Sent Events are not supported. Use WebSocket.",
+      error: "Server-Sent Events are not supported. Use Socket.IO.",
       upgrade: {
-        protocol: "websocket",
-        url: `${wsProtocol}://${ctx.host}/ws?token=${token}`,
+        protocol: "socket.io",
+        url: `${ctx.origin}/socket.io`,
         roomId: roomId
       }
     };
@@ -205,7 +234,7 @@ ws.onmessage = (event) => {
       .returning();
 
     ctx.status = 201;
-    ctx.body = { attachment };
+    ctx.body = { attachment: serializeAttachment(attachment, ctx.origin) };
   });
 
   // ─── GET /  (cursor-based pagination) ──────────────────────────────────────
@@ -286,7 +315,7 @@ ws.onmessage = (event) => {
     });
 
     ctx.body = {
-      messages: msgs.reverse(),
+      messages: msgs.map((m) => serializeMessage(m, ctx.origin)).reverse(),
       hasMore,
       cursor: msgs.length > 0 ? msgs[0].createdAt : null,
     };
@@ -441,19 +470,21 @@ ws.onmessage = (event) => {
       },
     });
 
-    // Broadcast to room via WebSocket
-    if (wss) {
-      wss.broadcastToRoom(roomId, { 
+    const serializedMessage = serializeMessage(fullMessage, ctx.origin);
+
+    // Broadcast to room via Socket.IO
+    if (realtime) {
+      realtime.broadcastToRoom(roomId, {
         type: "message:new", 
-        payload: fullMessage 
+        payload: serializedMessage 
       });
 
       // Auto-stop typing indicator for sender and clear typing timer.
-      wss.stopTypingForUser(roomId, ctx.state.userId);
+      realtime.stopTypingForUser(roomId, ctx.state.userId);
     }
 
     ctx.status = 201;
-    ctx.body = { message: fullMessage };
+    ctx.body = { message: serializedMessage };
   });
 
   // ─── PATCH /:messageId  (edit) ──────────────────────────────────────────────
@@ -504,15 +535,17 @@ ws.onmessage = (event) => {
       },
     });
 
-    // Broadcast edit event via WebSocket
-    if (wss) {
-      wss.broadcastToRoom(message.roomId, { 
+    const serializedMessage = serializeMessage(fullMessage, ctx.origin);
+
+    // Broadcast edit event via Socket.IO
+    if (realtime) {
+      realtime.broadcastToRoom(message.roomId, {
         type: "message:edited", 
-        payload: fullMessage 
+        payload: serializedMessage 
       });
     }
 
-    ctx.body = { message: fullMessage };
+    ctx.body = { message: serializedMessage };
   });
 
   // ─── DELETE /:messageId  (soft delete) ─────────────────────────────────────
@@ -544,9 +577,9 @@ ws.onmessage = (event) => {
       .set({ deletedAt: new Date() })
       .where(eq(schema.messages.id, messageId));
 
-    // Broadcast delete event via WebSocket
-    if (wss) {
-      wss.broadcastToRoom(message.roomId, {
+    // Broadcast delete event via Socket.IO
+    if (realtime) {
+      realtime.broadcastToRoom(message.roomId, {
         type: "message:deleted",
         payload: { messageId, roomId: message.roomId },
       });
@@ -593,9 +626,9 @@ ws.onmessage = (event) => {
       with: { user: { columns: { id: true, username: true } } },
     });
 
-    // Broadcast reaction update via WebSocket
-    if (wss) {
-      wss.broadcastToRoom(roomId, {
+    // Broadcast reaction update via Socket.IO
+    if (realtime) {
+      realtime.broadcastToRoom(roomId, {
         type: "message:reaction",
         payload: { messageId, reactions },
       });
@@ -621,8 +654,8 @@ ws.onmessage = (event) => {
       columns: { id: true, username: true, displayName: true }
     });
 
-    if (wss && user) {
-      wss.broadcastToRoom(roomId, {
+    if (realtime && user) {
+      realtime.broadcastToRoom(roomId, {
         type: "typing:start",
         payload: {
           userId: user.id,
@@ -647,8 +680,8 @@ ws.onmessage = (event) => {
       return;
     }
 
-    if (wss) {
-      wss.broadcastToRoom(roomId, {
+    if (realtime) {
+      realtime.broadcastToRoom(roomId, {
         type: "typing:stop",
         payload: {
           userId: ctx.state.userId,
