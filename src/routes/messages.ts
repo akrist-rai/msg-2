@@ -1,7 +1,7 @@
 import Router from "@koa/router";
 import { z } from "zod";
-import { eq, and, lt, desc, isNull, sql } from "drizzle-orm";
-import { db, schema } from "../db/index.ts";
+import { eq, and, lt, desc, isNull, sql, inArray } from "drizzle-orm";
+import { db, schema, supabase } from "../db/index.ts";
 import { requireAuth } from "../middleware/auth.ts";
 import type { WebSocketServer } from "../ws/handler.ts";
 
@@ -19,15 +19,103 @@ async function assertMember(roomId: string, userId: string) {
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 const sendMessageSchema = z.object({
-  content: z.string().min(1).max(4000),
+  content: z.string().max(4000).optional().default(""),
   type: z.enum(["text", "image"]).default("text"),
   replyToId: z.string().uuid().optional(),
+  attachmentIds: z.array(z.string().uuid()).max(10).optional().default([]),
 });
+
+function inferAttachmentType(mimeType: string): "image" | "video" | "audio" | "document" {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function getFirstFile(files: any): any | null {
+  if (!files) return null;
+  const candidates = [files.file, files.attachment, files.upload];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (Array.isArray(candidate)) return candidate[0] ?? null;
+    return candidate;
+  }
+  const first = Object.values(files)[0];
+  if (!first) return null;
+  return Array.isArray(first) ? first[0] ?? null : first;
+}
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createMessagesRouter(wss?: WebSocketServer) {
   const router = new Router({ prefix: "/rooms/:roomId/messages" });
+
+  // ─── POST /attachments  (upload file and create pending attachment) ─────────
+
+  router.post("/attachments", requireAuth, async (ctx) => {
+    const { roomId } = ctx.params;
+    const membership = await assertMember(roomId, ctx.state.userId);
+    if (!membership) {
+      ctx.status = 403;
+      ctx.body = { error: "Not a member of this room" };
+      return;
+    }
+
+    const file = getFirstFile((ctx.request as any).files);
+    if (!file?.filepath) {
+      ctx.status = 400;
+      ctx.body = { error: "No file uploaded" };
+      return;
+    }
+
+    const mimeType = file.mimetype || "application/octet-stream";
+    const filename = file.originalFilename || file.newFilename || "upload.bin";
+    const attachmentType = inferAttachmentType(mimeType);
+    const extension =
+      filename.includes(".") && filename.lastIndexOf(".") > 0
+        ? filename.slice(filename.lastIndexOf("."))
+        : "";
+    const storagePath = `${ctx.state.userId}/${Date.now()}-${crypto.randomUUID()}${extension}`;
+
+    const fileBytes = await Bun.file(file.filepath).arrayBuffer();
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET || "attachments";
+
+    let uploadResult = await supabase.storage
+      .from(bucket)
+      .upload(storagePath, fileBytes, { contentType: mimeType, upsert: false });
+
+    if (uploadResult.error && /bucket not found/i.test(uploadResult.error.message)) {
+      await supabase.storage.createBucket(bucket, { public: true });
+      uploadResult = await supabase.storage
+        .from(bucket)
+        .upload(storagePath, fileBytes, { contentType: mimeType, upsert: false });
+    }
+
+    if (uploadResult.error) {
+      ctx.status = 500;
+      ctx.body = { error: `Upload failed: ${uploadResult.error.message}` };
+      return;
+    }
+
+    const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+
+    const [attachment] = await db
+      .insert(schema.attachments)
+      .values({
+        messageId: null,
+        uploaderId: ctx.state.userId,
+        attachmentType,
+        storagePath,
+        publicUrl: publicData.publicUrl,
+        filename,
+        mimeType,
+        size: Number(file.size || fileBytes.byteLength),
+      })
+      .returning();
+
+    ctx.status = 201;
+    ctx.body = { attachment };
+  });
 
   // ─── GET /  (cursor-based pagination) ──────────────────────────────────────
 
@@ -57,6 +145,12 @@ export function createMessagesRouter(wss?: WebSocketServer) {
         reactions: {
           with: { user: { columns: { id: true, username: true } } },
         },
+        attachments: true,
+        reads: {
+          with: {
+            user: { columns: { id: true, username: true, displayName: true, avatarUrl: true } },
+          },
+        },
         replyTo: {
           columns: { id: true, content: true },
           with: {
@@ -70,6 +164,21 @@ export function createMessagesRouter(wss?: WebSocketServer) {
 
     const hasMore = msgs.length > limit;
     if (hasMore) msgs.pop();
+
+    if (msgs.length > 0) {
+      await db
+        .insert(schema.messageReads)
+        .values(
+          msgs.map((m) => ({
+            messageId: m.id,
+            userId: ctx.state.userId,
+            readAt: new Date(),
+          }))
+        )
+        .onConflictDoNothing({
+          target: [schema.messageReads.messageId, schema.messageReads.userId],
+        });
+    }
 
     await db
       .update(schema.roomMembers)
@@ -107,12 +216,41 @@ export function createMessagesRouter(wss?: WebSocketServer) {
       return;
     }
 
-    const { content, type, replyToId } = result.data;
+    const { content, type, replyToId, attachmentIds } = result.data;
+    const normalizedContent = content.trim();
+    if (!normalizedContent && attachmentIds.length === 0) {
+      ctx.status = 400;
+      ctx.body = { error: "Message content or attachment is required" };
+      return;
+    }
+
+    const messageType = attachmentIds.length > 0 && type === "text" ? "image" : type;
+    const messageContent = normalizedContent || "[attachment]";
 
     const [message] = await db
       .insert(schema.messages)
-      .values({ roomId, senderId: ctx.state.userId, content, type, replyToId })
+      .values({ roomId, senderId: ctx.state.userId, content: messageContent, type: messageType, replyToId })
       .returning();
+
+    if (attachmentIds.length > 0) {
+      await db
+        .update(schema.attachments)
+        .set({ messageId: message.id })
+        .where(
+          and(
+            inArray(schema.attachments.id, attachmentIds),
+            eq(schema.attachments.uploaderId, ctx.state.userId),
+            isNull(schema.attachments.messageId)
+          )
+        );
+    }
+
+    await db
+      .insert(schema.messageReads)
+      .values({ messageId: message.id, userId: ctx.state.userId, readAt: new Date() })
+      .onConflictDoNothing({
+        target: [schema.messageReads.messageId, schema.messageReads.userId],
+      });
 
     await db.execute(sql`
       UPDATE room_members
@@ -128,6 +266,12 @@ export function createMessagesRouter(wss?: WebSocketServer) {
           columns: { id: true, username: true, displayName: true, avatarUrl: true },
         },
         reactions: true,
+        attachments: true,
+        reads: {
+          with: {
+            user: { columns: { id: true, username: true, displayName: true, avatarUrl: true } },
+          },
+        },
         replyTo: {
           columns: { id: true, content: true },
           with: {

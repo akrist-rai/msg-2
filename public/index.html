@@ -587,6 +587,65 @@
   #send-btn:hover { background: var(--accent2); }
   #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  #attachment-input { display: none; }
+
+  #pending-attachments {
+    display: none;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .pending-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--soft);
+    background: var(--bg2);
+  }
+
+  .pending-attachment button {
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .msg-attachments {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .msg-attachment {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg2);
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--soft);
+    text-decoration: none;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .msg-attachment-image {
+    width: 140px;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    display: block;
+  }
+
   /* ─── EMOJI PICKER ──────────────────────────────────────────────────────── */
   .emoji-popup {
     position: absolute;
@@ -992,6 +1051,8 @@
         </div>
         <div id="input-wrapper">
           <button class="input-action" id="emoji-btn" title="React with emoji">☺</button>
+          <button class="input-action" id="attach-btn" title="Attach file">📎</button>
+          <input id="attachment-input" type="file" />
           <textarea
             id="msg-input"
             placeholder="Message…"
@@ -1000,6 +1061,7 @@
           ></textarea>
           <button class="input-action" id="send-btn" title="Send (Enter)">⬆</button>
         </div>
+        <div id="pending-attachments"></div>
       </div>
     </div>
   </main>
@@ -1111,6 +1173,7 @@ let state = {
   ws: null,
   wsStatus: 'disconnected',
   editingMessageId: null,
+  pendingAttachments: [],
 };
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1145,7 +1208,9 @@ function loadAuth() {
 // API HELPERS
 // ════════════════════════════════════════════════════════════════════════
 async function apiFetch(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const headers = { ...(options.headers || {}) };
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  if (!isFormData && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   if (state.accessToken) headers['Authorization'] = `Bearer ${state.accessToken}`;
 
   let res = await fetch(API + path, { ...options, headers });
@@ -1213,6 +1278,23 @@ async function apiDelete(path) {
   return res.json();
 }
 
+async function apiUploadAttachment(file) {
+  if (!state.currentRoomId) throw new Error('No room selected');
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiFetch(`/rooms/${state.currentRoomId}/messages/attachments`, {
+    method: 'POST',
+    body: form,
+    headers: {},
+  });
+  if (!res) return null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // TOAST
 // ════════════════════════════════════════════════════════════════════════
@@ -1259,6 +1341,8 @@ async function logout() {
   state.refreshToken = null;
   state.rooms = [];
   state.currentRoomId = null;
+  state.pendingAttachments = [];
+  renderPendingAttachments();
   saveAuth();
   showAuthModal();
 }
@@ -1419,6 +1503,7 @@ async function selectRoom(roomId) {
   state.hasMore = false;
   state.cursor = null;
   state.replyTo = null;
+  state.pendingAttachments = [];
 
   const room = state.rooms.find(r => r.id === roomId);
   if (!room) return;
@@ -1439,6 +1524,7 @@ async function selectRoom(roomId) {
 
   document.getElementById('messages-container').innerHTML = '';
   document.getElementById('typing-text').textContent = '';
+  renderPendingAttachments();
 
   await loadMessages();
   scrollToBottom(true);
@@ -1597,6 +1683,21 @@ function createMessageEl(msg) {
       }).join('')}
     </div>` : '';
 
+  const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+  const attachmentsHtml = attachments.length ? `
+    <div class="msg-attachments">
+      ${attachments.map(att => {
+        const url = esc(att.publicUrl || '#');
+        const name = esc(att.filename || 'attachment');
+        if (att.attachmentType === 'image') {
+          return `<a class="msg-attachment" href="${url}" target="_blank" rel="noopener noreferrer">
+            <img class="msg-attachment-image" src="${url}" alt="${name}" />
+          </a>`;
+        }
+        return `<a class="msg-attachment" href="${url}" target="_blank" rel="noopener noreferrer">${name}</a>`;
+      }).join('')}
+    </div>` : '';
+
   // Actions
   const editBtn = isMe && !msg.deletedAt ? `<button class="msg-action-btn" title="Edit" onclick="startEdit('${msg.id}')">✎</button>` : '';
   const deleteBtn = isMe && !msg.deletedAt ? `<button class="msg-action-btn" title="Delete" onclick="deleteMessage('${msg.id}')">✕</button>` : '';
@@ -1613,6 +1714,7 @@ function createMessageEl(msg) {
       <div class="msg-content ${msg.deletedAt ? 'deleted' : ''}" id="msg-content-${msg.id}">
         ${msg.deletedAt ? '<em>This message was deleted</em>' : formatMsgContent(msg.content)}
       </div>
+      ${attachmentsHtml}
       ${reactHtml}
     </div>
     <div class="msg-actions">
@@ -1699,17 +1801,59 @@ function groupReactions(reactions) {
   return [...map.values()];
 }
 
+function renderPendingAttachments() {
+  const holder = document.getElementById('pending-attachments');
+  if (!holder) return;
+  if (!state.pendingAttachments.length) {
+    holder.style.display = 'none';
+    holder.innerHTML = '';
+    return;
+  }
+  holder.style.display = 'flex';
+  holder.innerHTML = state.pendingAttachments.map((att, idx) => `
+    <span class="pending-attachment">
+      ${esc(att.filename || 'attachment')}
+      <button type="button" onclick="removePendingAttachment(${idx})" title="Remove">×</button>
+    </span>
+  `).join('');
+}
+
+function removePendingAttachment(index) {
+  state.pendingAttachments.splice(index, 1);
+  renderPendingAttachments();
+}
+
+async function uploadAttachment(file) {
+  if (!file) return;
+  if (!state.currentRoomId) {
+    toast('Select a room first', 'error');
+    return;
+  }
+  try {
+    const data = await apiUploadAttachment(file);
+    if (!data?.attachment) return;
+    state.pendingAttachments.push(data.attachment);
+    renderPendingAttachments();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 async function sendMessage() {
   const input = document.getElementById('msg-input');
   const content = input.value.trim();
-  if (!content || !state.currentRoomId) return;
+  if ((!content && state.pendingAttachments.length === 0) || !state.currentRoomId) return;
 
-  const body = { content };
+  const body = { content, attachmentIds: state.pendingAttachments.map((a) => a.id) };
   if (state.replyTo) body.replyToId = state.replyTo.id;
+  if (state.pendingAttachments.length > 0) body.type = 'image';
 
   input.value = '';
   autoResize(input);
   clearReply();
+  const pendingSnapshot = [...state.pendingAttachments];
+  state.pendingAttachments = [];
+  renderPendingAttachments();
 
   try {
     await apiPost(`/rooms/${state.currentRoomId}/messages`, body);
@@ -1718,6 +1862,8 @@ async function sendMessage() {
   } catch (err) {
     toast(err.message, 'error');
     input.value = content; // restore
+    state.pendingAttachments = pendingSnapshot;
+    renderPendingAttachments();
   }
 }
 
@@ -2121,6 +2267,18 @@ msgInput.addEventListener('keydown', (e) => {
 });
 
 document.getElementById('send-btn').addEventListener('click', sendMessage);
+document.getElementById('attach-btn').addEventListener('click', () => {
+  if (!state.currentRoomId) {
+    toast('Select a room first', 'error');
+    return;
+  }
+  document.getElementById('attachment-input').click();
+});
+document.getElementById('attachment-input').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (file) await uploadAttachment(file);
+  e.target.value = '';
+});
 
 // Reply banner close
 document.getElementById('reply-banner-close').addEventListener('click', clearReply);

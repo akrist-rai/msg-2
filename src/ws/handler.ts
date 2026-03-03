@@ -41,7 +41,12 @@ export class WebSocketServer {
     const token = url.searchParams.get("token");
 
     if (!token) {
-      ws.send(JSON.stringify({ type: "error", payload: "Missing token" }));
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          payload: "Missing token. Connect using /ws?token=<access_token>",
+        })
+      );
       ws.close(1008, "Missing token");
       return;
     }

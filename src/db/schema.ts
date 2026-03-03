@@ -5,18 +5,19 @@ import {
   uuid,
   boolean,
   integer,
+  bigint,
   pgEnum,
   index,
   unique,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { bigint } from "drizzle-orm/pg-core";
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 export const roomTypeEnum = pgEnum("room_type", ["direct", "group", "channel"]);
 export const messageTypeEnum = pgEnum("message_type", [
   "text",
+  "image",
   "system",
 ]);
 export const memberRoleEnum = pgEnum("member_role", [
@@ -296,6 +297,13 @@ export const reactionsRelations = relations(reactions, ({ one }) => ({
   user: one(users, { fields: [reactions.userId], references: [users.id] }),
 }));
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORTED TYPES
+// $inferSelect → the shape of a row when you SELECT it
+// $inferInsert → the shape of a row when you INSERT it (optional fields become optional)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -305,4 +313,9 @@ export type NewRoom = typeof rooms.$inferInsert;
 export type RoomMember = typeof roomMembers.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+
+export type Attachment  = typeof attachments.$inferSelect;
+export type NewAttachment = typeof attachments.$inferInsert;
+export type MessageRead = typeof messageReads.$inferSelect;
+
 export type Reaction = typeof reactions.$inferSelect;

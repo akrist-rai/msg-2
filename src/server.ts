@@ -76,7 +76,7 @@ server.listen(PORT, () => {
   
   Server is running on:               
       http://localhost:${PORT}            
-      ws://localhost:${PORT}/ws          
+      ws://localhost:${PORT}/ws?token=<access_token>          
 
   `);
 });

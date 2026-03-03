@@ -35,35 +35,38 @@ export async function requireAuth(ctx: Context, next: Next) {
   }
 
   const token = authHeader.slice(7);
+  let userId: string;
   try {
     const payload = verifyToken(token);
-    
-    // Attach user to context state
-    const user = await db.query.users.findFirst({
-      where: eq(schema.users.id, payload.userId),
-      columns: {
-        id: true,
-        username: true,
-        displayName: true,
-        email: true,
-        avatarUrl: true,
-        isOnline: true,
-      },
-    });
-
-    if (!user) {
-      ctx.status = 401;
-      ctx.body = { error: "User not found" };
-      return;
-    }
-
-    ctx.state.user = user;
-    ctx.state.userId = user.id;
-    await next();
-  } catch (err) {
+    userId = payload.userId;
+  } catch {
     ctx.status = 401;
     ctx.body = { error: "Invalid or expired token" };
+    return;
   }
+
+  // Attach user to context state
+  const user = await db.query.users.findFirst({
+    where: eq(schema.users.id, userId),
+    columns: {
+      id: true,
+      username: true,
+      displayName: true,
+      email: true,
+      avatarUrl: true,
+      isOnline: true,
+    },
+  });
+
+  if (!user) {
+    ctx.status = 401;
+    ctx.body = { error: "User not found" };
+    return;
+  }
+
+  ctx.state.user = user;
+  ctx.state.userId = user.id;
+  await next();
 }
 
 // Optional auth - attaches user if token present, doesn't fail if not
