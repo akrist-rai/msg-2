@@ -492,14 +492,6 @@ lsof -ti:3000 | xargs kill -9
    ```bash
    bun run start
    ```
-
-### Recommended Platforms
-
-- **Railway** - Easy deployment with Bun support
-- **Fly.io** - Global edge deployment
-- **Render** - Free tier available
-- **DigitalOcean** - App Platform with WebSocket support
-
 ---
 
 ## 📄 License
@@ -508,18 +500,3 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
----
-
-## 📞 Support
-
-If you have questions or need help:
-- Open an [issue](https://github.com/akrist-rai/msg-2/issues)
-- Check existing discussions
-
----
-
-**Built with ❤️ using Bun, Koa, and Supabase**
