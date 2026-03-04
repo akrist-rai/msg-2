@@ -14,6 +14,7 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
+    --canvas:    #f2f4f7;
     --bg:        #ffffff;
     --bg-rail:   #fcfcfd;
     --bg-hover:  #f9fafb;
@@ -28,18 +29,20 @@
     --green-bg:  #ecfdf3;
     --green-txt: #027a48;
     --radius:    8px;
+    --app-gap:   clamp(8px, 1.4vw, 18px);
     --font-sans: 'Inter', system-ui, sans-serif;
   }
 
   html, body { height: 100%; overflow: hidden; }
 
   body {
-    background: #f2f4f7;
+    background: var(--canvas);
     color: var(--text-main);
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    padding: var(--app-gap);
   }
 
   /* ─── SCROLLBAR ─────────────────────────────────────────────────────────── */
@@ -52,10 +55,14 @@
   #app {
     display: grid;
     grid-template-columns: 260px 340px 1fr;
-    grid-template-rows: 100vh;
-    height: 100vh;
-    width: 100vw;
+    grid-template-rows: 1fr;
+    height: calc(100vh - (var(--app-gap) * 2));
+    width: calc(100vw - (var(--app-gap) * 2));
     background: var(--bg);
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid rgba(16, 24, 40, 0.06);
+    box-shadow: 0 24px 48px -24px rgba(16, 24, 40, 0.28), 0 8px 16px -12px rgba(16, 24, 40, 0.18);
   }
 
   /* ─── RAIL (Sidebar 1) ─────────────────────────────────────────────────── */
@@ -71,23 +78,13 @@
   .rail-brand {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 0;
     font-weight: 600;
-    color: var(--text-main);
-    font-size: 16px;
+    color: var(--green);
+    font-size: 22px;
     padding: 0 8px;
-  }
-
-  .rail-cube {
-    width: 32px;
-    height: 32px;
-    background: #101828;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 18px;
+    font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    letter-spacing: 0.4px;
   }
 
   .rail-nav {
@@ -729,6 +726,169 @@
     background: #ffffff; border-radius: 12px; padding: 24px; width: 400px; max-width: 90vw;
     box-shadow: 0 20px 24px -4px rgba(16,24,40,0.08), 0 8px 8px -4px rgba(16,24,40,0.03);
   }
+  .theme-modal {
+    width: 460px;
+  }
+  .theme-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .theme-btn {
+    border: 1px solid var(--line);
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 12px;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-sans);
+    color: var(--text-main);
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  }
+  .theme-btn:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+  }
+  .theme-btn.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+  .theme-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .theme-preview {
+    display: flex;
+    gap: 6px;
+  }
+  .theme-preview i {
+    display: block;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(16,24,40,0.1);
+  }
+  :root[data-theme-mode="dark"] {
+    color-scheme: dark;
+  }
+  :root[data-theme-mode="dark"] #app {
+    border-color: rgba(148, 163, 184, 0.2);
+    box-shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.65), 0 8px 16px -12px rgba(0, 0, 0, 0.55);
+  }
+  :root[data-theme-mode="dark"] #chat-header,
+  :root[data-theme-mode="dark"] #network-header,
+  :root[data-theme-mode="dark"] .modal,
+  :root[data-theme-mode="dark"] .file-card,
+  :root[data-theme-mode="dark"] .msg-actions,
+  :root[data-theme-mode="dark"] #input-wrapper,
+  :root[data-theme-mode="dark"] .theme-btn,
+  :root[data-theme-mode="dark"] .btn-inline,
+  :root[data-theme-mode="dark"] .notification-item,
+  :root[data-theme-mode="dark"] .notifications-empty,
+  :root[data-theme-mode="dark"] .toast {
+    background: var(--bg) !important;
+    border-color: var(--line);
+    color: var(--text-main);
+  }
+  :root[data-theme-mode="dark"] .form-input {
+    background: var(--bg);
+    border-color: var(--line);
+    color: var(--text-main);
+  }
+  :root[data-theme-mode="dark"] .btn-ghost {
+    border-color: var(--line);
+  }
+  :root[data-theme-mode="dark"] .rail-badge,
+  :root[data-theme-mode="dark"] .messages-header-badge {
+    background: var(--bg-active);
+    color: var(--text-main);
+  }
+  .notifications-modal {
+    width: 520px;
+  }
+  .notifications-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .notifications-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .btn-inline {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text-main);
+    cursor: pointer;
+  }
+  .btn-inline:hover {
+    background: var(--bg-hover);
+  }
+  #notifications-list {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .notification-item {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+    padding: 12px;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .notification-item:last-child {
+    border-bottom: none;
+  }
+  .notification-item:hover {
+    background: var(--bg-hover);
+  }
+  .notification-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 4px;
+  }
+  .notification-preview {
+    font-size: 12px;
+    color: var(--text-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 330px;
+  }
+  .notification-count {
+    min-width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 8px;
+  }
+  .notifications-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-soft);
+    font-size: 13px;
+    background: #fff;
+  }
   .modal-title { font-size: 18px; font-weight: 600; color: var(--text-main); margin-bottom: 20px; }
   .form-group { margin-bottom: 16px; }
   .form-label { display: block; font-size: 14px; font-weight: 500; color: var(--text-main); margin-bottom: 6px; }
@@ -765,19 +925,15 @@
 <div id="app">
   <aside id="nav-rail">
     <div class="rail-brand">
-      <div class="rail-cube">◫</div>
       <span>msg</span>
     </div>
     <nav class="rail-nav">
       <button class="rail-item" id="nav-network-btn"><span class="rail-icon">⌂</span> Network</button>
-      <button class="rail-item"><span class="rail-icon">◫</span> Dashboard</button>
-      <button class="rail-item"><span class="rail-icon">▣</span> Projects</button>
-      <button class="rail-item"><span class="rail-icon">☑</span> Tasks <span class="rail-badge">10</span></button>
-      <button class="rail-item"><span class="rail-icon">◔</span> Reporting</button>
-      <button class="rail-item"><span class="rail-icon">◎</span> Users</button>
+      <button class="rail-item" id="nav-search-btn"><span class="rail-icon">◎</span> Search</button>
       <button class="rail-item active" id="nav-messages-btn"><span class="rail-icon">💬</span> Messages <span class="rail-badge">20</span></button>
     </nav>
     <nav class="rail-nav rail-foot">
+      <button class="rail-item" id="nav-theme-btn"><span class="rail-icon">◐</span> Theme</button>
       <button class="rail-item" id="nav-notifications-btn">Notifications <span class="rail-badge" id="nav-notifications-badge">0</span></button>
       <button class="rail-item" id="logout-btn"><span class="rail-icon">⏏</span> Logout</button>
     </nav>
@@ -911,6 +1067,52 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="theme-modal" style="display:none">
+  <div class="modal theme-modal">
+    <div class="modal-title">Choose Theme</div>
+    <div class="theme-grid" id="theme-grid">
+      <button class="theme-btn" data-theme="default" type="button">
+        <div class="theme-name">Default</div>
+        <div class="theme-preview"><i style="background:#1570ef"></i><i style="background:#12b76a"></i><i style="background:#f2f4f7"></i></div>
+      </button>
+      <button class="theme-btn" data-theme="mint" type="button">
+        <div class="theme-name">Mint</div>
+        <div class="theme-preview"><i style="background:#059669"></i><i style="background:#10b981"></i><i style="background:#ecfdf5"></i></div>
+      </button>
+      <button class="theme-btn" data-theme="ocean" type="button">
+        <div class="theme-name">Ocean</div>
+        <div class="theme-preview"><i style="background:#0ea5e9"></i><i style="background:#14b8a6"></i><i style="background:#ecfeff"></i></div>
+      </button>
+      <button class="theme-btn" data-theme="sunset" type="button">
+        <div class="theme-name">Sunset</div>
+        <div class="theme-preview"><i style="background:#f97316"></i><i style="background:#ef4444"></i><i style="background:#fff7ed"></i></div>
+      </button>
+      <button class="theme-btn" data-theme="midnight" type="button">
+        <div class="theme-name">Midnight</div>
+        <div class="theme-preview"><i style="background:#60a5fa"></i><i style="background:#34d399"></i><i style="background:#020617"></i></div>
+      </button>
+      <button class="theme-btn" data-theme="graphite" type="button">
+        <div class="theme-name">Graphite</div>
+        <div class="theme-preview"><i style="background:#a78bfa"></i><i style="background:#22d3ee"></i><i style="background:#0f172a"></i></div>
+      </button>
+    </div>
+    <button class="btn btn-ghost" id="cancel-theme-modal">Close</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="notifications-modal" style="display:none">
+  <div class="modal notifications-modal">
+    <div class="notifications-header">
+      <div class="modal-title" style="margin-bottom:0">Notifications</div>
+      <div class="notifications-actions">
+        <button class="btn-inline" id="mark-all-read-btn" type="button">Mark all read</button>
+      </div>
+    </div>
+    <div id="notifications-list"></div>
+    <button class="btn btn-ghost" id="close-notifications-modal">Close</button>
+  </div>
+</div>
+
 <div id="toast-container"></div>
 
 <script>
@@ -919,11 +1121,203 @@
 // ════════════════════════════════════════════════════════════════════════
 const BACKEND_ORIGIN = location.port === '3000' ? location.origin : `${location.protocol}//localhost:3000`;
 const API = `${BACKEND_ORIGIN}/api`;
+const THEME_STORAGE_KEY = 'msg.theme';
+const THEMES = {
+  default: {
+    mode: 'light',
+    canvas: '#f2f4f7',
+    bg: '#ffffff',
+    bgRail: '#fcfcfd',
+    bgHover: '#f9fafb',
+    bgActive: '#f2f4f7',
+    line: '#eaecf0',
+    textMain: '#101828',
+    textMuted: '#475467',
+    textSoft: '#667085',
+    accent: '#1570ef',
+    accentBg: '#eff8ff',
+    green: '#12b76a',
+    greenBg: '#ecfdf3',
+    greenTxt: '#027a48',
+  },
+  mint: {
+    mode: 'light',
+    canvas: '#eefcf5',
+    bg: '#ffffff',
+    bgRail: '#f8fffb',
+    bgHover: '#f0fdf4',
+    bgActive: '#dcfce7',
+    line: '#d1fae5',
+    textMain: '#052e16',
+    textMuted: '#166534',
+    textSoft: '#15803d',
+    accent: '#059669',
+    accentBg: '#d1fae5',
+    green: '#10b981',
+    greenBg: '#ecfdf5',
+    greenTxt: '#047857',
+  },
+  ocean: {
+    mode: 'light',
+    canvas: '#edf8ff',
+    bg: '#ffffff',
+    bgRail: '#f4fbff',
+    bgHover: '#e0f2fe',
+    bgActive: '#bae6fd',
+    line: '#cdeafe',
+    textMain: '#082f49',
+    textMuted: '#075985',
+    textSoft: '#0369a1',
+    accent: '#0ea5e9',
+    accentBg: '#e0f2fe',
+    green: '#14b8a6',
+    greenBg: '#ccfbf1',
+    greenTxt: '#0f766e',
+  },
+  sunset: {
+    mode: 'light',
+    canvas: '#fff7ed',
+    bg: '#ffffff',
+    bgRail: '#fffaf2',
+    bgHover: '#ffedd5',
+    bgActive: '#fed7aa',
+    line: '#fed7aa',
+    textMain: '#431407',
+    textMuted: '#9a3412',
+    textSoft: '#c2410c',
+    accent: '#f97316',
+    accentBg: '#ffedd5',
+    green: '#ef4444',
+    greenBg: '#fee2e2',
+    greenTxt: '#b91c1c',
+  },
+  midnight: {
+    mode: 'dark',
+    canvas: '#020617',
+    bg: '#0b1220',
+    bgRail: '#111827',
+    bgHover: '#1f2937',
+    bgActive: '#243247',
+    line: '#334155',
+    textMain: '#e2e8f0',
+    textMuted: '#94a3b8',
+    textSoft: '#cbd5e1',
+    accent: '#60a5fa',
+    accentBg: '#1e3a8a',
+    green: '#34d399',
+    greenBg: '#064e3b',
+    greenTxt: '#6ee7b7',
+  },
+  graphite: {
+    mode: 'dark',
+    canvas: '#030712',
+    bg: '#0f172a',
+    bgRail: '#111827',
+    bgHover: '#1f2937',
+    bgActive: '#2b3548',
+    line: '#374151',
+    textMain: '#f3f4f6',
+    textMuted: '#9ca3af',
+    textSoft: '#d1d5db',
+    accent: '#a78bfa',
+    accentBg: '#312e81',
+    green: '#22d3ee',
+    greenBg: '#164e63',
+    greenTxt: '#67e8f9',
+  },
+};
 let state = {
   user: null, accessToken: null, refreshToken: null, rooms: [], currentRoomId: null,
   messages: [], hasMore: false, cursor: null, loadingMessages: false, replyTo: null,
   typingUsers: {}, socket: null, editingMessageId: null, pendingAttachments: [],
 };
+
+function applyTheme(themeName) {
+  const t = THEMES[themeName] || THEMES.default;
+  const root = document.documentElement;
+  root.setAttribute('data-theme-mode', t.mode === 'dark' ? 'dark' : 'light');
+  root.style.setProperty('--canvas', t.canvas);
+  root.style.setProperty('--bg', t.bg);
+  root.style.setProperty('--bg-rail', t.bgRail);
+  root.style.setProperty('--bg-hover', t.bgHover);
+  root.style.setProperty('--bg-active', t.bgActive);
+  root.style.setProperty('--line', t.line);
+  root.style.setProperty('--text-main', t.textMain);
+  root.style.setProperty('--text-muted', t.textMuted);
+  root.style.setProperty('--text-soft', t.textSoft);
+  root.style.setProperty('--accent', t.accent);
+  root.style.setProperty('--accent-bg', t.accentBg);
+  root.style.setProperty('--green', t.green);
+  root.style.setProperty('--green-bg', t.greenBg);
+  root.style.setProperty('--green-txt', t.greenTxt);
+  document.querySelectorAll('.theme-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.theme === themeName);
+  });
+}
+
+function setTheme(themeName) {
+  applyTheme(themeName);
+  localStorage.setItem(THEME_STORAGE_KEY, themeName);
+  document.getElementById('theme-modal').style.display = 'none';
+}
+
+function openThemeModal() {
+  document.getElementById('theme-modal').style.display = 'flex';
+}
+
+function getUnreadRooms() {
+  return state.rooms
+    .filter((room) => Number(room.unreadCount || 0) > 0)
+    .sort((a, b) => {
+      const aTs = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+      const bTs = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+      return bTs - aTs;
+    });
+}
+
+function renderNotificationsList() {
+  const list = document.getElementById('notifications-list');
+  const unreadRooms = getUnreadRooms();
+  if (!unreadRooms.length) {
+    list.innerHTML = '<div class="notifications-empty">No new notifications</div>';
+    return;
+  }
+  list.innerHTML = unreadRooms.map((room) => {
+    const title = esc(getRoomName(room));
+    const count = Number(room.unreadCount || 0);
+    const preview = esc(room.lastMessage?.content || room.description || 'New activity');
+    return `
+      <button class="notification-item" type="button" data-room-id="${room.id}">
+        <div>
+          <div class="notification-title">${title}</div>
+          <div class="notification-preview">${preview}</div>
+        </div>
+        <div class="notification-count">${count}</div>
+      </button>
+    `;
+  }).join('');
+}
+
+function openNotificationsModal() {
+  renderNotificationsList();
+  document.getElementById('notifications-modal').style.display = 'flex';
+}
+
+function closeNotificationsModal() {
+  document.getElementById('notifications-modal').style.display = 'none';
+}
+
+async function markAllNotificationsRead() {
+  const unreadRooms = getUnreadRooms();
+  if (!unreadRooms.length) return;
+
+  await Promise.all(unreadRooms.map((room) =>
+    apiGet(`/rooms/${room.id}/messages?limit=1`).catch(() => null)
+  ));
+
+  await loadRooms();
+  renderNotificationsList();
+}
 
 // --- VIEW MANAGEMENT ---
 function showView(viewId) {
@@ -948,6 +1342,9 @@ function showView(viewId) {
 
 document.getElementById('nav-network-btn').addEventListener('click', () => showView('network-view'));
 document.getElementById('nav-messages-btn').addEventListener('click', () => showView(state.currentRoomId ? 'chat-view' : 'empty-state'));
+document.getElementById('nav-search-btn').addEventListener('click', () => openUserSearchModal());
+document.getElementById('nav-theme-btn').addEventListener('click', () => openThemeModal());
+document.getElementById('nav-notifications-btn').addEventListener('click', () => openNotificationsModal());
 document.getElementById('seed-network-btn').addEventListener('click', async () => {
   try {
     await apiPost('/social/seed-dummy', {});
@@ -1187,6 +1584,9 @@ function connectSocket() {
       if (room) {
         room.unreadCount = Number(room.unreadCount || 0) + 1;
         renderSidebar();
+        if (document.getElementById('notifications-modal').style.display === 'flex') {
+          renderNotificationsList();
+        }
       }
     }
   });
@@ -1572,17 +1972,43 @@ async function onAuthenticated() {
   connectSocket();
 }
 document.getElementById('logout-btn').addEventListener('click', logout);
-document.getElementById('nav-notifications-btn').addEventListener('click', () => {
-  showView(state.currentRoomId ? 'chat-view' : 'empty-state');
+document.getElementById('cancel-theme-modal').addEventListener('click', () => {
+  document.getElementById('theme-modal').style.display = 'none';
+});
+document.querySelectorAll('.theme-btn').forEach((btn) => {
+  btn.addEventListener('click', () => setTheme(btn.dataset.theme));
+});
+document.getElementById('close-notifications-modal').addEventListener('click', closeNotificationsModal);
+document.getElementById('mark-all-read-btn').addEventListener('click', async () => {
+  await markAllNotificationsRead();
+  toast('All notifications marked as read', 'success');
+});
+document.getElementById('notifications-list').addEventListener('click', (e) => {
+  const target = e.target.closest('.notification-item');
+  if (!target) return;
+  const roomId = target.dataset.roomId;
+  if (!roomId) return;
+  closeNotificationsModal();
+  selectRoom(roomId);
+});
+document.getElementById('notifications-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'notifications-modal') closeNotificationsModal();
 });
 
 // New DM flow
 document.getElementById('new-dm-btn').addEventListener('click', () => {
-  document.getElementById('new-dm-modal').style.display = 'flex';
+  openUserSearchModal();
 });
 document.getElementById('cancel-new-dm').addEventListener('click', () => {
   document.getElementById('new-dm-modal').style.display = 'none';
 });
+function openUserSearchModal() {
+  document.getElementById('new-dm-modal').style.display = 'flex';
+  const input = document.getElementById('dm-search-input');
+  input.value = '';
+  document.getElementById('dm-search-results').style.display = 'none';
+  input.focus();
+}
 document.getElementById('dm-search-input').addEventListener('input', async (e) => {
   const q = e.target.value.trim();
   const resEl = document.getElementById('dm-search-results');
@@ -1608,6 +2034,7 @@ async function startDM(userId) {
 }
 
 async function init() {
+  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'default');
   if (loadAuth()) { onAuthenticated(); } else { document.getElementById('auth-modal').style.display = 'flex'; }
 }
 init();
